@@ -2,10 +2,15 @@
 @inject NavigationManager Nav
 
 <div class="nav-brand">
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-    </svg>
-    Zeiterfassung
+    <div class="nav-brand-mark">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+        </svg>
+    </div>
+    <div>
+        <div class="nav-brand-title">Zeiterfassung</div>
+        <div class="nav-brand-sub">Arztpraxis · Hamburg</div>
+    </div>
 </div>
 
 <nav class="nav-section">
@@ -20,7 +25,7 @@
 
 <nav class="nav-section">
     <span class="nav-label">Mitarbeiter</span>
-    <NavLink class="nav-link" href="selfservice">
+    <NavLink class="nav-link" href="selfservice" Match="NavLinkMatch.All">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/>
             <line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
@@ -40,6 +45,12 @@
     <Authorized>
         <nav class="nav-section">
             <span class="nav-label">Administration</span>
+            <NavLink class="nav-link" href="admin/aktivitaet">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+                </svg>
+                Aktivität
+            </NavLink>
             <NavLink class="nav-link" href="admin/mitarbeiter">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
@@ -102,14 +113,14 @@
 <AuthorizeView>
     <Authorized>
         <div class="nav-user">
+            <div class="nav-user-avatar">@(context.User.Identity?.Name?.Substring(0, Math.Min(2, context.User.Identity?.Name?.Length ?? 0)).ToUpper() ?? "?")</div>
             <div class="nav-user-info">
                 <span class="nav-user-name">@context.User.Identity?.Name</span>
                 <span class="nav-user-role">Administrator</span>
             </div>
             <a href="/logout" class="nav-logout" title="Abmelden">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
-                    <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M15 4h4a1 1 0 011 1v14a1 1 0 01-1 1h-4"/><path d="M10 17l5-5-5-5"/><path d="M15 12H3"/>
                 </svg>
             </a>
         </div>
@@ -128,87 +139,135 @@
 </AuthorizeView>
 
 <style>
-    :host, .nav-brand, .nav-section, .nav-link, .nav-label,
-    .nav-user, .nav-login-hint, .nav-spacer { all: revert; }
+    :host, .nav-brand, .nav-brand-mark, .nav-brand-title, .nav-brand-sub,
+    .nav-section, .nav-link, .nav-label,
+    .nav-user, .nav-user-avatar, .nav-login-hint, .nav-spacer { all: revert; }
 
     .nav-brand {
         display: flex;
         align-items: center;
-        gap: 0.6rem;
-        padding: 1.25rem 1rem 1rem;
-        font-size: 0.9rem;
+        gap: 0.75rem;
+        padding: 1.25rem 1rem 1.25rem;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 0.75rem;
+    }
+
+    .nav-brand-mark {
+        width: 34px; height: 34px;
+        border-radius: 8px;
+        background: var(--accent);
+        color: #fff;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0;
+    }
+
+    .nav-brand-title {
+        font-size: 0.9375rem;
         font-weight: 600;
-        color: #e2e8f0;
-        border-bottom: 1px solid rgba(255,255,255,0.08);
-        margin-bottom: 0.5rem;
+        color: var(--text);
+        letter-spacing: -0.015em;
+        line-height: 1.2;
+    }
+
+    .nav-brand-sub {
+        font-size: 0.6875rem;
+        color: var(--text-muted);
+        margin-top: 1px;
+        line-height: 1;
     }
 
     .nav-section {
-        padding: 0.5rem 0.5rem 0.25rem;
+        padding: 0 0.625rem 0.5rem;
     }
 
     .nav-label {
         display: block;
-        font-size: 0.68rem;
+        font-size: 0.625rem;
         font-weight: 600;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.1em;
         text-transform: uppercase;
-        color: #64748b;
-        padding: 0.25rem 0.5rem 0.4rem;
+        color: var(--text-muted);
+        padding: 0.5rem 0.5rem 0.375rem;
     }
 
     .nav-link {
         display: flex;
         align-items: center;
-        gap: 0.6rem;
-        padding: 0.55rem 0.75rem;
-        border-radius: 8px;
-        color: #94a3b8;
+        gap: 0.625rem;
+        padding: 0.5rem 0.75rem;
+        border-radius: 7px;
+        color: var(--text-dim);
         text-decoration: none;
-        font-size: 0.875rem;
+        font-size: 0.84375rem;
         font-weight: 450;
-        min-height: 40px;
-        transition: background 0.12s ease, color 0.12s ease;
-        margin-bottom: 2px;
+        min-height: 38px;
+        transition: background 0.1s ease, color 0.1s ease;
+        margin-bottom: 1px;
         width: 100%;
         box-sizing: border-box;
+        position: relative;
     }
 
-    .nav-link:hover { background: rgba(255,255,255,0.07); color: #e2e8f0; }
-    .nav-link.active { background: rgba(79,142,247,0.15); color: #6aa3ff; font-weight: 500; }
-    .nav-link svg { flex-shrink: 0; opacity: 0.7; }
-    .nav-link.active svg { opacity: 1; }
+    .nav-link:hover { background: var(--surface-hi); color: var(--text); }
+    .nav-link.active {
+        background: var(--accent-soft);
+        color: var(--accent);
+        font-weight: 600;
+    }
+    .nav-link.active::before {
+        content: '';
+        position: absolute;
+        left: -0.625rem;
+        top: 50%; transform: translateY(-50%);
+        width: 3px; height: 18px;
+        border-radius: 2px;
+        background: var(--accent);
+    }
+    .nav-link svg { flex-shrink: 0; color: var(--text-muted); }
+    .nav-link.active svg { color: var(--accent); }
+    .nav-link:hover svg { color: var(--text-dim); }
 
     .nav-spacer { flex: 1; }
 
     .nav-user {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-        padding: 0.75rem 0.875rem;
-        border-top: 1px solid rgba(255,255,255,0.08);
+        gap: 0.625rem;
+        padding: 0.875rem 0.75rem;
+        border-top: 1px solid var(--border);
         margin-top: auto;
     }
 
+    .nav-user-avatar {
+        width: 32px; height: 32px;
+        border-radius: 16px;
+        background: var(--surface);
+        border: 1px solid var(--border-strong);
+        color: var(--accent);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.6875rem; font-weight: 600;
+        flex-shrink: 0;
+        letter-spacing: 0.03em;
+    }
+
     .nav-user-info { flex: 1; overflow: hidden; }
-    .nav-user-name { display: block; font-size: 0.8rem; font-weight: 600; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .nav-user-role { display: block; font-size: 0.7rem; color: #64748b; }
+    .nav-user-name { display: block; font-size: 0.78125rem; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .nav-user-role { display: block; font-size: 0.6875rem; color: var(--text-muted); margin-top: 1px; }
 
     .nav-logout {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 32px; height: 32px;
-        border-radius: 8px;
-        color: #64748b;
+        display: flex; align-items: center; justify-content: center;
+        width: 28px; height: 28px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        color: var(--text-dim);
         text-decoration: none;
         flex-shrink: 0;
-        transition: background 0.12s, color 0.12s;
+        transition: background 0.1s, color 0.1s;
     }
-    .nav-logout:hover { background: rgba(248,113,113,0.15); color: #f87171; }
+    .nav-logout:hover { background: var(--red-bg); color: var(--red-fg); border-color: var(--red-border); }
 
     .nav-login-hint {
-        padding: 0.5rem;
-        border-top: 1px solid rgba(255,255,255,0.08);
+        padding: 0.5rem 0.625rem;
+        border-top: 1px solid var(--border);
     }
 </style>

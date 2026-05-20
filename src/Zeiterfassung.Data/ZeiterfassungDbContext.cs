@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Zeiterfassung.Core.Models;
 using Zeiterfassung.Data.Interceptors;
 
@@ -6,8 +7,6 @@ namespace Zeiterfassung.Data;
 
 public class ZeiterfassungDbContext : DbContext
 {
-    private readonly AuditInterceptor? _auditInterceptor;
-
     public DbSet<Employee> Employees { get; set; } = null!;
     public DbSet<TimeEntry> TimeEntries { get; set; } = null!;
     public DbSet<WorkingTimePattern> WorkingTimePatterns { get; set; } = null!;
@@ -18,32 +17,57 @@ public class ZeiterfassungDbContext : DbContext
     public DbSet<AuditLog> AuditLogs { get; set; } = null!;
     public DbSet<User> Users { get; set; } = null!;
 
-    public ZeiterfassungDbContext(
-        DbContextOptions<ZeiterfassungDbContext> options,
-        AuditInterceptor? auditInterceptor = null)
+    public ZeiterfassungDbContext(DbContextOptions<ZeiterfassungDbContext> options)
         : base(options)
     {
-        _auditInterceptor = auditInterceptor;
     }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
         base.OnConfiguring(optionsBuilder);
-
-        if (_auditInterceptor != null)
-        {
-            optionsBuilder.AddInterceptors(_auditInterceptor);
-        }
-
         if (!optionsBuilder.IsConfigured)
         {
+            // Design-time / migrations fallback only. Runtime configuration
+            // (incl. AuditInterceptor) is wired up by AddDbContext in Program.cs.
             optionsBuilder.UseSqlite("Data Source=zeiterfassung.db");
         }
     }
 
+    /// <summary>
+    /// Force DateTime.Kind=Utc on every read-back. SQLite has no native
+    /// DateTime type and EF Core returns values with Kind=Unspecified by
+    /// default. That breaks the hash chain because HashChainService calls
+    /// ToUniversalTime() — which on Unspecified treats the value as LOCAL
+    /// and shifts it by the local offset, producing a different payload
+    /// than at insert time. With this converter every DateTime that
+    /// leaves the DB is tagged Utc again, so re-computing the hash from
+    /// stored data matches the original.
+    /// </summary>
+    private static readonly ValueConverter<DateTime, DateTime> _utcConverter =
+        new(
+            v => v.Kind == DateTimeKind.Utc ? v : v.ToUniversalTime(),
+            v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
+
+    private static readonly ValueConverter<DateTime?, DateTime?> _utcConverterNullable =
+        new(
+            v => v.HasValue ? (v.Value.Kind == DateTimeKind.Utc ? v.Value : v.Value.ToUniversalTime()) : v,
+            v => v.HasValue ? DateTime.SpecifyKind(v.Value, DateTimeKind.Utc) : v);
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        // Apply the UTC converter to every DateTime / DateTime? property
+        // in the model. Must run before the explicit entity blocks so the
+        // converter is in place when the providers map columns.
+        foreach (var entity in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (var prop in entity.GetProperties())
+            {
+                if (prop.ClrType == typeof(DateTime))      prop.SetValueConverter(_utcConverter);
+                else if (prop.ClrType == typeof(DateTime?)) prop.SetValueConverter(_utcConverterNullable);
+            }
+        }
 
         modelBuilder.Entity<Employee>(entity =>
         {

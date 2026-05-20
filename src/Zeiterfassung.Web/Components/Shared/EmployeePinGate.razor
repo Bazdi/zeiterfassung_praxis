@@ -1,0 +1,257 @@
+@*  PIN gate for SelfService.
+
+    Wraps a SelfService page. Behavior:
+    - If the current cookie identity is an Admin, the gate is BYPASSED:
+      the page renders immediately and the parent can let the admin
+      choose any employee.
+    - Otherwise, the gate shows an employee picker + PIN keypad. On a
+      correct PIN, EmployeeSessionService.SignIn(empId) is called and
+      the page renders with the employee locked to that id (no picker).
+    - Sessions expire after EmployeeSessionService.IdleTimeout (10 min).
+
+    Parent usage:
+        <EmployeePinGate Context="ctx">
+            ... your page content, with ctx.EmployeeId and ctx.IsAdmin ...
+        </EmployeePinGate>
+*@
+
+@inject ZeiterfassungDbContext Db
+@inject PinAuthenticationService PinAuth
+@inject Zeiterfassung.Web.Services.EmployeeSessionService Session
+@inject NavigationManager Nav
+
+@if (_isAdmin || Session.IsAuthenticated)
+{
+    Session.Touch();
+    @ChildContent(new GateContext(Session.AuthenticatedEmployeeId, _isAdmin, SignOut))
+}
+else
+{
+    <div class="pingate-shell">
+        <div class="pingate-card">
+            <div class="pingate-head">
+                <div class="pingate-mark">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                         stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+                    </svg>
+                </div>
+                <div>
+                    <div class="pingate-title">Persönlicher Zugang</div>
+                    <div class="pingate-sub">PIN eingeben um eigene Zeiten zu sehen</div>
+                </div>
+            </div>
+
+            @if (_selectedEmployee == null)
+            {
+                <label class="z-label">Mitarbeiter</label>
+                <select class="form-select" @onchange="OnEmployeeSelected">
+                    <option value="">— bitte wählen —</option>
+                    @foreach (var emp in _employees)
+                    {
+                        <option value="@emp.Id">@emp.LastName, @emp.FirstName</option>
+                    }
+                </select>
+            }
+            else
+            {
+                <div class="pingate-selected">
+                    <div class="pingate-avatar">@Initials(_selectedEmployee)</div>
+                    <div>
+                        <div class="pingate-name">@_selectedEmployee.FirstName @_selectedEmployee.LastName</div>
+                        <button type="button" class="pingate-change" @onclick="ResetSelection">
+                            Anderer Mitarbeiter
+                        </button>
+                    </div>
+                </div>
+
+                <label class="z-label" style="margin-top:1rem">PIN (6-stellig)</label>
+                <input type="password" class="form-control" maxlength="6" inputmode="numeric"
+                       autocomplete="off" autofocus
+                       placeholder="••••••"
+                       @bind="_pin" @bind:event="oninput"
+                       @onkeyup="OnPinKeyUp"
+                       style="letter-spacing:0.5rem; font-size:1.125rem; text-align:center" />
+
+                @if (_pinError != null)
+                {
+                    <div class="alert alert-danger mt-2" role="alert">@_pinError</div>
+                }
+
+                <button type="button" class="btn btn-primary w-100 mt-3" @onclick="VerifyPin"
+                        disabled="@(_pin.Length != 6 || _busy)">
+                    @if (_busy)
+                    {
+                        <span class="spinner-border spinner-border-sm me-2"></span>
+                    }
+                    PIN bestätigen
+                </button>
+            }
+
+            <div class="pingate-foot">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/>
+                </svg>
+                Datenschutz: nach 10 Minuten Inaktivität wird die Sitzung beendet.
+                Sie sehen ausschließlich Ihre eigenen Daten.
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .pingate-shell {
+        display: flex; align-items: flex-start; justify-content: center;
+        padding: 1rem 0;
+    }
+    .pingate-card {
+        background: #fff;
+        border: 1px solid rgba(26, 24, 21, 0.08);
+        border-radius: 12px;
+        padding: 1.75rem;
+        width: 100%; max-width: 440px;
+    }
+    .pingate-head {
+        display: flex; align-items: center; gap: 0.875rem;
+        margin-bottom: 1.25rem;
+    }
+    .pingate-mark {
+        width: 40px; height: 40px;
+        border-radius: 8px;
+        background: #1f5b4c;
+        color: #fff;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0;
+    }
+    .pingate-title { font-size: 1.0625rem; font-weight: 600; letter-spacing: -0.01em; color: #1a1815; }
+    .pingate-sub   { font-size: 0.78125rem; color: #5a544c; margin-top: 0.125rem; }
+
+    .pingate-selected {
+        display: flex; align-items: center; gap: 0.875rem;
+        padding: 0.75rem;
+        background: #faf7f0;
+        border: 1px solid rgba(26, 24, 21, 0.08);
+        border-radius: 8px;
+    }
+    .pingate-avatar {
+        width: 40px; height: 40px;
+        border-radius: 20px;
+        background: #fff;
+        border: 1px solid rgba(26, 24, 21, 0.12);
+        color: #1f5b4c;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.875rem; font-weight: 600;
+        flex-shrink: 0;
+    }
+    .pingate-name { font-size: 0.9375rem; font-weight: 500; color: #1a1815; }
+    .pingate-change {
+        background: transparent; border: none; padding: 0;
+        font-size: 0.75rem; color: #5a544c;
+        text-decoration: underline; cursor: pointer; margin-top: 2px;
+    }
+    .pingate-change:hover { color: #1f5b4c; }
+
+    .pingate-foot {
+        display: flex; align-items: flex-start; gap: 0.5rem;
+        margin-top: 1.25rem;
+        padding-top: 1rem;
+        border-top: 1px solid rgba(26, 24, 21, 0.08);
+        font-size: 0.6875rem; color: #8d877d; line-height: 1.45;
+    }
+    .pingate-foot svg { color: #1f5b4c; flex-shrink: 0; margin-top: 1px; }
+</style>
+
+@code {
+    [Parameter, EditorRequired] public RenderFragment<GateContext> ChildContent { get; set; } = default!;
+
+    [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    private List<Employee> _employees = new();
+    private Employee? _selectedEmployee;
+    private string _pin = "";
+    private string? _pinError;
+    private bool _busy;
+    private bool _isAdmin;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await Db.Employees
+            .Where(e => e.IsActive)
+            .OrderBy(e => e.LastName).ThenBy(e => e.FirstName)
+            .ToListAsync();
+
+        if (AuthStateTask != null)
+        {
+            var s = await AuthStateTask;
+            _isAdmin = s.User.IsInRole("Admin");
+        }
+    }
+
+    private void OnEmployeeSelected(ChangeEventArgs e)
+    {
+        _pinError = null;
+        _pin = "";
+        if (int.TryParse(e.Value?.ToString(), out var id))
+            _selectedEmployee = _employees.FirstOrDefault(x => x.Id == id);
+        else
+            _selectedEmployee = null;
+    }
+
+    private void ResetSelection()
+    {
+        _selectedEmployee = null;
+        _pin = "";
+        _pinError = null;
+    }
+
+    private async Task OnPinKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && _pin.Length == 6) await VerifyPin();
+    }
+
+    private async Task VerifyPin()
+    {
+        if (_selectedEmployee == null || _pin.Length != 6) return;
+        _busy = true;
+        _pinError = null;
+
+        try
+        {
+            var fresh = await Db.Employees.FindAsync(_selectedEmployee.Id);
+            if (fresh == null) { _pinError = "Mitarbeiter nicht gefunden."; return; }
+
+            var result = PinAuth.Authenticate(fresh, _pin);
+            await Db.SaveChangesAsync();
+
+            if (!result.Success)
+            {
+                _pin = "";
+                if (result.RequiresAdminReset)
+                    _pinError = "Konto gesperrt — bitte Admin kontaktieren.";
+                else if (result.LockoutRemainingSeconds.HasValue)
+                    _pinError = $"Gesperrt für {result.LockoutRemainingSeconds}s.";
+                else
+                    _pinError = $"Falsche PIN. {result.RemainingAttempts} Versuche verbleibend.";
+                return;
+            }
+
+            Session.SignIn(fresh.Id);
+        }
+        finally { _busy = false; }
+    }
+
+    private void SignOut()
+    {
+        Session.SignOut();
+        _selectedEmployee = null;
+        _pin = "";
+        _pinError = null;
+    }
+
+    private static string Initials(Employee e)
+        => ((e.FirstName.Length > 0 ? e.FirstName[0].ToString() : "")
+          + (e.LastName.Length  > 0 ? e.LastName[0].ToString()  : "")).ToUpperInvariant();
+
+    public record GateContext(int? EmployeeId, bool IsAdmin, Action SignOut);
+}

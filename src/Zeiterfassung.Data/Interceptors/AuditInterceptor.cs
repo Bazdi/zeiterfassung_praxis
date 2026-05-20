@@ -51,14 +51,49 @@ public class AuditInterceptor : SaveChangesInterceptor
 
     private static void EnforceAppendOnly(ZeiterfassungDbContext db)
     {
-        var violations = db.ChangeTracker.Entries<TimeEntry>()
-            .Where(e => e.State is EntityState.Modified or EntityState.Deleted)
-            .Select(e => e.Entity.Id)
-            .ToList();
+        // TimeEntry: deletion forbidden. Modification forbidden EXCEPT the
+        // one-time hash sealing performed by StempelManager — the two-phase
+        // INSERT-then-UPDATE pattern needs the real DB Id in the hash payload,
+        // so we allow PrevHash/Hash to change from the GenesisHash placeholder
+        // exactly once. Semantic columns (EmployeeId, Type, Timestamp, …)
+        // must never be modified.
+        var hashSealingProps = new HashSet<string>
+        {
+            nameof(TimeEntry.PrevHash),
+            nameof(TimeEntry.Hash)
+        };
 
-        if (violations.Count > 0)
-            throw new InvalidOperationException(
-                $"TimeEntry is append-only. Cannot modify/delete entries: {string.Join(", ", violations)}");
+        foreach (var entry in db.ChangeTracker.Entries<TimeEntry>())
+        {
+            if (entry.State == EntityState.Deleted)
+            {
+                throw new InvalidOperationException(
+                    $"TimeEntry darf nicht gelöscht werden: #{entry.Entity.Id}");
+            }
+
+            if (entry.State != EntityState.Modified) continue;
+
+            var changedProps = entry.Properties
+                .Where(p => p.IsModified)
+                .Select(p => p.Metadata.Name)
+                .ToHashSet();
+
+            var nonHashChanges = changedProps.Except(hashSealingProps).ToList();
+            if (nonHashChanges.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    $"TimeEntry ist append-only. Verbotene Felder geändert auf #{entry.Entity.Id}: " +
+                    string.Join(", ", nonHashChanges));
+            }
+
+            // Sealing is one-shot: original Hash must still be the placeholder.
+            var originalHash = entry.Property(nameof(TimeEntry.Hash)).OriginalValue as string;
+            if (originalHash != HashChainService.GenesisHash)
+            {
+                throw new InvalidOperationException(
+                    $"TimeEntry Hash wurde bereits versiegelt — keine erneute Änderung erlaubt: #{entry.Entity.Id}");
+            }
+        }
 
         var auditViolations = db.ChangeTracker.Entries<AuditLog>()
             .Where(e => e.State is EntityState.Modified or EntityState.Deleted)
@@ -67,7 +102,7 @@ public class AuditInterceptor : SaveChangesInterceptor
 
         if (auditViolations.Count > 0)
             throw new InvalidOperationException(
-                $"AuditLog is append-only. Cannot modify/delete entries: {string.Join(", ", auditViolations)}");
+                $"AuditLog ist append-only. Verboten: {string.Join(", ", auditViolations)}");
     }
 
     private async Task CreateAuditEntriesAsync(

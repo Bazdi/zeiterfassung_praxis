@@ -23,6 +23,15 @@
             a.href = url; a.download = filename; a.click();
             URL.revokeObjectURL(url);
         };
+        // Close mobile nav drawer on link click + Escape key.
+        document.addEventListener('click', e => {
+            if (e.target.closest('.nav-link') || e.target.closest('.nav-backdrop')) {
+                document.documentElement.classList.remove('nav-open');
+            }
+        });
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') document.documentElement.classList.remove('nav-open');
+        });
     </script>
 </body>
 

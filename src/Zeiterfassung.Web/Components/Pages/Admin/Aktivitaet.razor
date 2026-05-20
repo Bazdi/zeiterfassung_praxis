@@ -1,0 +1,432 @@
+@page "/admin/aktivitaet"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject ZeiterfassungDbContext Db
+@implements IDisposable
+
+<PageTitle>Aktivität — Admin</PageTitle>
+
+<h1>
+    Aktivität
+    <span class="live-dot" title="Live · aktualisiert sich automatisch"></span>
+</h1>
+<p class="lead">Live-Übersicht aller Stempelungen und Admin-Aktionen.</p>
+
+<div class="d-flex gap-2 flex-wrap mb-3">
+    <span class="z-chip @(_filter == "all" ? "active" : "")" @onclick='() => SetFilter("all")'>Alles</span>
+    <span class="z-chip @(_filter == "stamps" ? "active" : "")" @onclick='() => SetFilter("stamps")'>Nur Stempelungen</span>
+    <span class="z-chip @(_filter == "admin" ? "active" : "")" @onclick='() => SetFilter("admin")'>Admin-Aktionen</span>
+    <span class="z-chip @(_filter == "today" ? "active" : "")" @onclick='() => SetFilter("today")'>Heute</span>
+    <span style="flex:1"></span>
+    <span style="font-size:0.75rem;color:var(--text-muted);align-self:center;font-variant-numeric:tabular-nums">
+        zuletzt aktualisiert @_lastRefresh.ToLocalTime().ToString("HH:mm:ss")
+    </span>
+</div>
+
+<div class="row">
+    <div class="col-lg-7">
+        <div class="card" style="overflow:hidden">
+            <div class="card-body" style="padding:0">
+                @if (_items.Count == 0)
+                {
+                    <div class="z-empty" style="margin:0;border-radius:0;border:none">
+                        Noch keine Aktivität in diesem Filter.
+                    </div>
+                }
+                else
+                {
+                    <ul class="activity-list">
+                        @foreach (var ev in _items)
+                        {
+                            <li class="activity-item @(ev.IsAdmin ? "is-admin" : "")">
+                                <div class="activity-time">
+                                    <div class="t1">@ev.WhenLocal.ToString("HH:mm")</div>
+                                    <div class="t2">@FormatRelative(ev.WhenLocal)</div>
+                                </div>
+                                <div class="activity-icon @ev.IconClass" title="@ev.Title">
+                                    @((MarkupString)ev.IconSvg)
+                                </div>
+                                <div class="activity-body">
+                                    <div class="activity-headline">
+                                        <span class="activity-actor">@ev.Actor</span>
+                                        <span class="activity-action">@ev.Action</span>
+                                    </div>
+                                    @if (!string.IsNullOrEmpty(ev.Detail))
+                                    {
+                                        <div class="activity-detail">@ev.Detail</div>
+                                    }
+                                </div>
+                                @if (ev.SourceBadge is not null)
+                                {
+                                    <span class="badge bg-secondary">@ev.SourceBadge</span>
+                                }
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card mb-3">
+            <div class="card-body">
+                <div style="font-size:0.6875rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);margin-bottom:0.75rem">
+                    Anwesenheit gerade jetzt
+                </div>
+                @if (_currentStatus.Count == 0)
+                {
+                    <div style="color:var(--text-muted);font-size:0.875rem">Niemand hat sich heute gestempelt.</div>
+                }
+                else
+                {
+                    <div class="status-list">
+                        @foreach (var s in _currentStatus)
+                        {
+                            <div class="status-row">
+                                <div class="status-avatar">@s.Initials</div>
+                                <div style="flex:1;min-width:0">
+                                    <div class="status-name">@s.Name</div>
+                                    <div class="status-meta tabular-nums">@s.MetaLine</div>
+                                </div>
+                                <span class="badge @s.BadgeClass">@s.StatusLabel</span>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-body">
+                <div style="font-size:0.6875rem;font-weight:600;letter-spacing:0.08em;text-transform:uppercase;color:var(--text-muted);margin-bottom:0.75rem">
+                    Heute · Zusammenfassung
+                </div>
+                <div class="summary-grid">
+                    <div>
+                        <div class="summary-value tabular-nums">@_summary.Total</div>
+                        <div class="summary-label">Stempelungen</div>
+                    </div>
+                    <div>
+                        <div class="summary-value tabular-nums" style="color:var(--green-fg)">@_summary.InNow</div>
+                        <div class="summary-label">Anwesend</div>
+                    </div>
+                    <div>
+                        <div class="summary-value tabular-nums" style="color:var(--yellow-fg)">@_summary.OnBreak</div>
+                        <div class="summary-label">In Pause</div>
+                    </div>
+                    <div>
+                        <div class="summary-value tabular-nums" style="color:var(--text-muted)">@_summary.Gone</div>
+                        <div class="summary-label">Gegangen</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .live-dot {
+        display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+        background: var(--green-fg); margin-left: 0.625rem;
+        vertical-align: middle;
+        animation: live-pulse 1.6s ease-in-out infinite;
+    }
+    @@keyframes live-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 rgba(47, 122, 92, 0.5); }
+        50%      { box-shadow: 0 0 0 6px rgba(47, 122, 92, 0); }
+    }
+    @@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+
+    .activity-list { list-style: none; padding: 0; margin: 0; }
+    .activity-item {
+        display: grid;
+        grid-template-columns: 64px 32px 1fr auto;
+        gap: 0.75rem;
+        align-items: center;
+        padding: 0.875rem 1rem;
+        border-bottom: 1px solid var(--border);
+    }
+    .activity-item:last-child { border-bottom: none; }
+    .activity-time { text-align: right; font-variant-numeric: tabular-nums; }
+    .activity-time .t1 { font-size: 0.875rem; font-weight: 500; color: var(--text); }
+    .activity-time .t2 { font-size: 0.6875rem; color: var(--text-muted); }
+    .activity-icon {
+        width: 32px; height: 32px; border-radius: 16px;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0;
+    }
+    .activity-icon.kommen     { background: var(--green-bg);  color: var(--green-fg); }
+    .activity-icon.pausestart { background: var(--yellow-bg); color: var(--yellow-fg); }
+    .activity-icon.pauseend   { background: var(--blue-bg);   color: var(--blue-fg); }
+    .activity-icon.gehen      { background: var(--red-bg);    color: var(--red-fg); }
+    .activity-icon.admin      { background: var(--accent-dim); color: var(--accent); }
+    .activity-body { min-width: 0; }
+    .activity-headline { font-size: 0.875rem; line-height: 1.35; }
+    .activity-actor  { font-weight: 600; color: var(--text); margin-right: 0.375rem; }
+    .activity-action { color: var(--text-dim); }
+    .activity-detail { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.125rem; }
+
+    .status-list { display: flex; flex-direction: column; gap: 0.5rem; }
+    .status-row {
+        display: flex; align-items: center; gap: 0.625rem;
+        padding: 0.5rem 0.625rem;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+    }
+    .status-avatar {
+        width: 30px; height: 30px; border-radius: 15px;
+        background: var(--surface-2);
+        border: 1px solid var(--border);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 0.6875rem; font-weight: 600;
+        color: var(--accent);
+        flex-shrink: 0;
+    }
+    .status-name { font-size: 0.8125rem; font-weight: 500; color: var(--text);
+                   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .status-meta { font-size: 0.6875rem; color: var(--text-muted); margin-top: 1px; }
+
+    .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.625rem; }
+    .summary-value { font-size: 1.5rem; font-weight: 600; letter-spacing: -0.025em; }
+    .summary-label { font-size: 0.6875rem; color: var(--text-muted);
+                     text-transform: uppercase; letter-spacing: 0.06em; }
+
+    @@media (max-width: 991px) {
+        .activity-item { grid-template-columns: 56px 28px 1fr auto; gap: 0.5rem; padding: 0.75rem; }
+    }
+</style>
+
+@code {
+    private System.Timers.Timer? _timer;
+    private List<ActivityEvent> _items = new();
+    private List<EmployeeStatusRow> _currentStatus = new();
+    private SummaryDto _summary = new();
+    private DateTime _lastRefresh = DateTime.UtcNow;
+    private string _filter = "all";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _timer = new System.Timers.Timer(10_000);
+        _timer.Elapsed += async (_, _) =>
+        {
+            await LoadAsync();
+            await InvokeAsync(StateHasChanged);
+        };
+        _timer.Start();
+    }
+
+    public void Dispose() => _timer?.Dispose();
+
+    private async Task SetFilter(string f)
+    {
+        _filter = f;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        var sinceUtc = _filter == "today"
+            ? DateTime.UtcNow.Date
+            : DateTime.UtcNow.AddDays(-3);
+
+        // ── Stamps ─────────────────────────────────────────────
+        var stamps = _filter == "admin"
+            ? new List<TimeEntry>()
+            : await Db.TimeEntries
+                .Where(e => e.TimestampUtc >= sinceUtc)
+                .OrderByDescending(e => e.TimestampUtc)
+                .Take(60)
+                .Include(e => e.Employee)
+                .ToListAsync();
+
+        // ── Admin / audit actions ─────────────────────────────
+        var audits = _filter == "stamps"
+            ? new List<AuditLog>()
+            : await Db.AuditLogs
+                .Where(a => a.TimestampUtc >= sinceUtc
+                            && a.EntityName != "TimeEntry") // stamps are already in the list above
+                .OrderByDescending(a => a.TimestampUtc)
+                .Take(40)
+                .ToListAsync();
+
+        var events = new List<ActivityEvent>(stamps.Count + audits.Count);
+
+        foreach (var s in stamps)
+        {
+            var name = s.Employee is null ? $"MA #{s.EmployeeId}"
+                                          : $"{s.Employee.FirstName} {s.Employee.LastName}";
+            events.Add(new ActivityEvent
+            {
+                WhenLocal  = s.TimestampUtc.ToLocalTime(),
+                Actor      = name,
+                Action     = TypeLabel(s.Type) + " gestempelt",
+                IconClass  = s.Type.ToString().ToLowerInvariant(),
+                IconSvg    = TypeIcon(s.Type),
+                Title      = s.Type.ToString(),
+                Detail     = s.Source == EntrySource.Terminal ? null
+                              : s.Source == EntrySource.Correction ? "via Korrekturantrag (Admin)"
+                              : s.Source == EntrySource.Migration ? "Seed/Migration"
+                              : s.Source.ToString(),
+                SourceBadge = s.Source == EntrySource.Terminal ? null : s.Source.ToString(),
+                IsAdmin = false,
+            });
+        }
+        foreach (var a in audits)
+        {
+            events.Add(new ActivityEvent
+            {
+                WhenLocal  = a.TimestampUtc.ToLocalTime(),
+                Actor      = "Admin",
+                Action     = $"{a.Action} · {a.EntityName} #{a.EntityId}",
+                IconClass  = "admin",
+                IconSvg    = AdminIconSvg(),
+                Title      = a.Action,
+                Detail     = null,
+                IsAdmin    = true,
+            });
+        }
+
+        _items = events
+            .OrderByDescending(e => e.WhenLocal)
+            .Take(60)
+            .ToList();
+
+        // ── Sidebar status + summary ───────────────────────────
+        await BuildStatusAsync();
+        _lastRefresh = DateTime.UtcNow;
+    }
+
+    private async Task BuildStatusAsync()
+    {
+        var todayUtc = DateTime.UtcNow.Date;
+        var todayEntries = await Db.TimeEntries
+            .Where(e => e.TimestampUtc >= todayUtc)
+            .OrderBy(e => e.TimestampUtc)
+            .Include(e => e.Employee)
+            .ToListAsync();
+
+        var rows = new List<EmployeeStatusRow>();
+        int inNow = 0, onBreak = 0, gone = 0;
+
+        var byEmp = todayEntries.GroupBy(e => e.EmployeeId);
+        foreach (var grp in byEmp)
+        {
+            var ordered = grp.OrderBy(e => e.TimestampUtc).ToList();
+            var last = ordered[^1];
+            var emp = last.Employee;
+            var name = emp is null ? $"MA #{grp.Key}" : $"{emp.FirstName} {emp.LastName}";
+            var first = (emp?.FirstName.Length > 0 ? emp.FirstName[0].ToString() : "")
+                      + (emp?.LastName.Length  > 0 ? emp.LastName[0].ToString()  : "");
+
+            string label; string badgeClass; string meta;
+            switch (last.Type)
+            {
+                case TimeEntryType.Kommen:
+                case TimeEntryType.PauseEnd:
+                    inNow++;
+                    label = "Anwesend"; badgeClass = "bg-success";
+                    var kommen = ordered.First(e => e.Type == TimeEntryType.Kommen).TimestampUtc.ToLocalTime();
+                    meta = $"seit {kommen:HH:mm}";
+                    break;
+                case TimeEntryType.PauseStart:
+                    onBreak++;
+                    label = "Pause"; badgeClass = "bg-warning";
+                    meta = $"in Pause seit {last.TimestampUtc.ToLocalTime():HH:mm}";
+                    break;
+                case TimeEntryType.Gehen:
+                    gone++;
+                    label = "Gegangen"; badgeClass = "bg-secondary";
+                    meta = $"abgemeldet {last.TimestampUtc.ToLocalTime():HH:mm}";
+                    break;
+                default:
+                    label = "—"; badgeClass = "bg-secondary"; meta = "";
+                    break;
+            }
+
+            rows.Add(new EmployeeStatusRow
+            {
+                EmployeeId = grp.Key,
+                Name = name,
+                Initials = first.ToUpperInvariant(),
+                StatusLabel = label,
+                BadgeClass = badgeClass,
+                MetaLine = meta,
+                SortKey = last.TimestampUtc,
+            });
+        }
+
+        _currentStatus = rows.OrderByDescending(r => r.SortKey).ToList();
+        _summary = new SummaryDto
+        {
+            Total = todayEntries.Count,
+            InNow = inNow,
+            OnBreak = onBreak,
+            Gone = gone,
+        };
+    }
+
+    private static string FormatRelative(DateTime localTime)
+    {
+        var diff = DateTime.Now - localTime;
+        if (diff < TimeSpan.FromMinutes(1)) return "gerade eben";
+        if (diff < TimeSpan.FromHours(1))   return $"vor {(int)diff.TotalMinutes} Min.";
+        if (diff < TimeSpan.FromDays(1))    return $"vor {(int)diff.TotalHours} Std.";
+        return localTime.ToString("dd.MM.");
+    }
+
+    private static string TypeLabel(TimeEntryType t) => t switch
+    {
+        TimeEntryType.Kommen     => "Kommen",
+        TimeEntryType.PauseStart => "Pause-Start",
+        TimeEntryType.PauseEnd   => "Pause-Ende",
+        TimeEntryType.Gehen      => "Gehen",
+        _ => t.ToString(),
+    };
+
+    private static string TypeIcon(TimeEntryType t) => t switch
+    {
+        TimeEntryType.Kommen     => "<svg width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M7 5l12 7-12 7V5z'/></svg>",
+        TimeEntryType.PauseStart => "<svg width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='6' y='5' width='4' height='14' rx='1'/><rect x='14' y='5' width='4' height='14' rx='1'/></svg>",
+        TimeEntryType.PauseEnd   => "<svg width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M7 5l12 7-12 7V5z'/></svg>",
+        TimeEntryType.Gehen      => "<svg width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M15 4h4a1 1 0 011 1v14a1 1 0 01-1 1h-4'/><path d='M10 17l5-5-5-5'/><path d='M15 12H3'/></svg>",
+        _ => "",
+    };
+
+    private static string AdminIconSvg() =>
+        "<svg width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z'/></svg>";
+
+    private sealed class ActivityEvent
+    {
+        public DateTime WhenLocal { get; set; }
+        public string Actor { get; set; } = "";
+        public string Action { get; set; } = "";
+        public string IconClass { get; set; } = "";
+        public string IconSvg { get; set; } = "";
+        public string Title { get; set; } = "";
+        public string? Detail { get; set; }
+        public string? SourceBadge { get; set; }
+        public bool IsAdmin { get; set; }
+    }
+
+    private sealed class EmployeeStatusRow
+    {
+        public int EmployeeId { get; set; }
+        public string Name { get; set; } = "";
+        public string Initials { get; set; } = "";
+        public string StatusLabel { get; set; } = "";
+        public string BadgeClass { get; set; } = "";
+        public string MetaLine { get; set; } = "";
+        public DateTime SortKey { get; set; }
+    }
+
+    private sealed class SummaryDto
+    {
+        public int Total { get; set; }
+        public int InNow { get; set; }
+        public int OnBreak { get; set; }
+        public int Gone { get; set; }
+    }
+}

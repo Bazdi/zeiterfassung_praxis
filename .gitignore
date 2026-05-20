@@ -70,3 +70,26 @@ Thumbs.db
 # Logs
 logs/
 *.log
+
+# ── Zeiterfassung — local artifacts ───────────────────────────────────────
+# Published self-contained binary
+publish/
+# Local SQLite databases (production + demo + tests)
+zeiterfassung.db
+zeiterfassung.db-*
+zeiterfassung-demo.db
+zeiterfassung-demo.db-*
+zeiterfassung-test.db
+zeiterfassung-test.db-*
+src/Zeiterfassung.Web/zeiterfassung*.db
+src/Zeiterfassung.Web/zeiterfassung*.db-*
+# Verification screenshots (debug artifacts at repo root)
+/*.png
+# Playwright MCP cache
+.playwright-mcp/
+# Node deps for the UI test suite
+tests/UI/node_modules/
+tests/UI/test-results/
+tests/UI/playwright-report/
+# Design handoff bundle (large; kept locally only)
+_design_extract/

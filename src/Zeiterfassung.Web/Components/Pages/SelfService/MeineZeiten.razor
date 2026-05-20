@@ -1,6 +1,7 @@
 @page "/selfservice"
 @page "/selfservice/meinezeiten"
 @rendermode InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.AllowAnonymous]
 @inject ZeiterfassungDbContext Db
 @inject SaldoService SaldoSvc
 
@@ -8,84 +9,107 @@
 
 <h1>Meine Zeiten</h1>
 
-@if (_employee == null)
-{
-    <div class="mb-3">
-        <label class="form-label">Mitarbeiter auswählen:</label>
-        <select class="form-select w-auto d-inline-block ms-2" @onchange="EmployeeSelected">
-            <option value="">— bitte wählen —</option>
-            @foreach (var emp in _employees)
-            {
-                <option value="@emp.Id">@emp.LastName, @emp.FirstName</option>
-            }
-        </select>
-    </div>
-}
-else
-{
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <h4>@_employee.LastName, @_employee.FirstName</h4>
-        <div>
-            <button class="btn btn-outline-secondary btn-sm" @onclick="() => PrevMonth()">◀</button>
-            <span class="mx-2">@_viewDate.ToString("MMMM yyyy")</span>
-            <button class="btn btn-outline-secondary btn-sm" @onclick="() => NextMonth()">▶</button>
-        </div>
-    </div>
+<EmployeePinGate Context="ctx">
+    @{
+        // Admin sees an employee picker; PIN-authenticated employee is
+        // locked to their own id.
+        var lockedEmpId = ctx.IsAdmin ? null : ctx.EmployeeId;
+    }
 
-    <div class="row mb-4">
-        <div class="col-md-3">
-            <div class="card text-center @(_monthlySaldo >= 0 ? "border-success" : "border-danger")">
-                <div class="card-body">
-                    <h6 class="card-subtitle text-muted">Überstunden-Saldo</h6>
-                    <div class="fs-3 fw-bold @(_monthlySaldo >= 0 ? "text-success" : "text-danger")">
-                        @(_monthlySaldo >= 0 ? "+" : "")@_monthlySaldo.ToString("F1")h
+    @if (ctx.IsAdmin && _employee == null)
+    {
+        <div class="mb-3">
+            <label class="form-label">Mitarbeiter auswählen:</label>
+            <select class="form-select w-auto d-inline-block ms-2" @onchange="EmployeeSelected">
+                <option value="">— bitte wählen —</option>
+                @foreach (var emp in _employees)
+                {
+                    <option value="@emp.Id">@emp.LastName, @emp.FirstName</option>
+                }
+            </select>
+        </div>
+    }
+    else
+    {
+        // For an employee with an active PIN session, force-load their own data
+        // once on first render.
+        if (_employee == null && lockedEmpId != null)
+        {
+            _employee = _employees.FirstOrDefault(e => e.Id == lockedEmpId);
+            if (_employee != null) _ = LoadData();
+        }
+    }
+
+    @if (_employee != null)
+    {
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4>@_employee.LastName, @_employee.FirstName</h4>
+            <div>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="() => PrevMonth()">◀</button>
+                <span class="mx-2">@_viewDate.ToString("MMMM yyyy")</span>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="() => NextMonth()">▶</button>
+                @if (!ctx.IsAdmin)
+                {
+                    <button class="btn btn-outline-secondary btn-sm ms-3" @onclick="ctx.SignOut">Abmelden</button>
+                }
+            </div>
+        </div>
+
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card text-center @(_monthlySaldo >= 0 ? "border-success" : "border-danger")">
+                    <div class="card-body">
+                        <h6 class="card-subtitle text-muted">Überstunden-Saldo</h6>
+                        <div class="fs-3 fw-bold @(_monthlySaldo >= 0 ? "text-success" : "text-danger")">
+                            @(_monthlySaldo >= 0 ? "+" : "")@_monthlySaldo.ToString("F1")h
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="card-subtitle text-muted">Gesamtarbeitszeit</h6>
+                        <div class="fs-3 fw-bold">@_totalWorkedHours.ToString("F1")h</div>
                     </div>
                 </div>
             </div>
         </div>
-        <div class="col-md-3">
-            <div class="card text-center">
-                <div class="card-body">
-                    <h6 class="card-subtitle text-muted">Gesamtarbeitszeit</h6>
-                    <div class="fs-3 fw-bold">@_totalWorkedHours.ToString("F1")h</div>
-                </div>
-            </div>
-        </div>
-    </div>
 
-    <table class="table table-sm table-hover">
-        <thead>
-            <tr>
-                <th>Datum</th>
-                <th>Kommen</th>
-                <th>Gehen</th>
-                <th>Pause</th>
-                <th>Arbeitszeit</th>
-                <th>Soll</th>
-                <th>Differenz</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach (var day in _dailySummaries)
-            {
-                <tr class="@(day.IsToday ? "table-active" : "")">
-                    <td>
-                        @day.Date.ToString("ddd dd.MM")
-                        @if (day.HasWarning) { <span class="badge bg-warning text-dark ms-1">⚠</span> }
-                    </td>
-                    <td>@(day.KommenTime?.ToString("HH:mm") ?? "—")</td>
-                    <td>@(day.GehenTime?.ToString("HH:mm") ?? "—")</td>
-                    <td>@(day.PauseMinutes > 0 ? $"{day.PauseMinutes}min" : "—")</td>
-                    <td>@(day.WorkedHours > 0 ? $"{day.WorkedHours:F1}h" : "—")</td>
-                    <td>@(day.RequiredHours > 0 ? $"{day.RequiredHours:F1}h" : "—")</td>
-                    <td class="@(day.Diff >= 0 ? "text-success" : "text-danger")">
-                        @(day.Diff != 0 ? $"{(day.Diff >= 0 ? "+" : "")}{day.Diff:F1}h" : "—")
-                    </td>
+        <table class="table table-sm table-hover">
+            <thead>
+                <tr>
+                    <th>Datum</th>
+                    <th>Kommen</th>
+                    <th>Gehen</th>
+                    <th>Pause</th>
+                    <th>Arbeitszeit</th>
+                    <th>Soll</th>
+                    <th>Differenz</th>
                 </tr>
-            }
-        </tbody>
-    </table>
-}
+            </thead>
+            <tbody>
+                @foreach (var day in _dailySummaries)
+                {
+                    <tr class="@(day.IsToday ? "table-active" : "")">
+                        <td>
+                            @day.Date.ToString("ddd dd.MM")
+                            @if (day.HasWarning) { <span class="badge bg-warning text-dark ms-1">⚠</span> }
+                        </td>
+                        <td>@(day.KommenTime?.ToString("HH:mm") ?? "—")</td>
+                        <td>@(day.GehenTime?.ToString("HH:mm") ?? "—")</td>
+                        <td>@(day.PauseMinutes > 0 ? $"{day.PauseMinutes}min" : "—")</td>
+                        <td>@(day.WorkedHours > 0 ? $"{day.WorkedHours:F1}h" : "—")</td>
+                        <td>@(day.RequiredHours > 0 ? $"{day.RequiredHours:F1}h" : "—")</td>
+                        <td class="@(day.Diff >= 0 ? "text-success" : "text-danger")">
+                            @(day.Diff != 0 ? $"{(day.Diff >= 0 ? "+" : "")}{day.Diff:F1}h" : "—")
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</EmployeePinGate>
 
 @code {
     private List<Employee> _employees = new();

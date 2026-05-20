@@ -1,0 +1,14 @@
+{
+  "name": "zeiterfassung-ui-tests",
+  "version": "1.0.0",
+  "private": true,
+  "description": "End-to-end UI smoke tests for the Zeiterfassung Blazor app — verifies the warm cream/sage design tokens render correctly across setup, login, terminal, and dashboard.",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.60.0"
+  }
+}

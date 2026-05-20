@@ -32,10 +32,19 @@ public class HashChainService
             entry.CreatedAtUtc.ToUniversalTime().ToString("O")
         });
 
+    /// <summary>
+    /// AuditLog payload. NOTE: Id is intentionally NOT included.
+    /// AuditInterceptor computes the hash inside SavingChangesAsync —
+    /// before EF assigns the auto-increment Id — so including Id in the
+    /// payload would mean hashing against Id=0 and verifying against the
+    /// stored Id (e.g. 7), producing a guaranteed false-positive
+    /// "manipulation" finding. The chain's tamper-evidence is provided
+    /// by the PrevHash links plus the hashed content; row position is
+    /// implicitly checked because reordering would break PrevHash.
+    /// </summary>
     public string CreatePayload(AuditLog entry) =>
         string.Join("|", new[]
         {
-            entry.Id.ToString(),
             entry.UserId?.ToString() ?? "",
             entry.EntityName,
             entry.EntityId,

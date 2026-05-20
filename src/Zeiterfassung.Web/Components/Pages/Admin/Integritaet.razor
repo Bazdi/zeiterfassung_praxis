@@ -22,7 +22,7 @@
     <div class="alert @(_result.IsValid ? "alert-success" : "alert-danger")">
         @if (_result.IsValid)
         {
-            <p><strong>&#10003; Kette intakt.</strong> <span>@_totalEntries Eintraege sind unveraendert und konsistent.</span></p>
+            <p><strong>&#10003; Kette intakt.</strong> <span>@_totalEntries Einträge sind unverändert und konsistent.</span></p>
         }
         else
         {
@@ -47,7 +47,7 @@
     <div class="alert @(_auditResult.IsValid ? "alert-success" : "alert-danger") mt-2">
         @if (_auditResult.IsValid)
         {
-            <p><strong>&#10003; AuditLog-Kette intakt.</strong> <span>@_auditEntries Audit-Eintraege sind konsistent.</span></p>
+            <p><strong>&#10003; AuditLog-Kette intakt.</strong> <span>@_auditEntries Audit-Einträge sind konsistent.</span></p>
         }
         else
         {

@@ -13,10 +13,11 @@
         *, *::before, *::after { box-sizing: border-box; }
         html, body {
             margin: 0; height: 100%;
-            background: #0f1117;
-            color: #e2e8f0;
-            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #f4f1ea;
+            color: #1a1815;
+            font-family: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
             -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
         }
         .page {
             min-height: 100vh;
@@ -24,121 +25,235 @@
             align-items: center;
             justify-content: center;
             padding: 2rem;
+            position: relative;
+            overflow: hidden;
         }
-        .card {
-            width: 100%;
-            max-width: 460px;
-            background: #1a1d27;
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 16px;
-            padding: 2.5rem;
-            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        .page::before, .page::after {
+            content: ''; position: absolute; inset: 0; pointer-events: none;
         }
+        .page::before {
+            background:
+              radial-gradient(720px 520px at 30% 20%, #e8f0ec, transparent 60%),
+              radial-gradient(600px 400px at 80% 90%, rgba(31,91,76,0.04), transparent 60%);
+        }
+        .page::after {
+            opacity: 0.5;
+            background-image:
+              linear-gradient(rgba(26, 24, 21, 0.08) 1px, transparent 1px),
+              linear-gradient(90deg, rgba(26, 24, 21, 0.08) 1px, transparent 1px);
+            background-size: 56px 56px;
+            -webkit-mask-image: radial-gradient(circle at center, black 0%, transparent 75%);
+                    mask-image: radial-gradient(circle at center, black 0%, transparent 75%);
+        }
+        .wrap { position: relative; width: 100%; max-width: 500px; }
+        .badge-row { text-align: center; margin-bottom: 1.375rem; }
         .badge-new {
-            display: inline-block;
-            background: rgba(79,142,247,0.15);
-            color: #6aa3ff;
-            border: 1px solid rgba(79,142,247,0.3);
-            border-radius: 20px;
-            padding: 0.2rem 0.75rem;
-            font-size: 0.72rem;
-            font-weight: 600;
-            letter-spacing: 0.05em;
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            background: #fbf2dc;
+            color: #9a6b14;
+            border: 1px solid rgba(154, 107, 20, 0.28);
+            border-radius: 6px;
+            padding: 0.375rem 0.75rem;
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.12em;
             text-transform: uppercase;
-            margin-bottom: 1rem;
         }
-        h1 { font-size: 1.4rem; font-weight: 600; margin: 0 0 0.25rem; color: #e2e8f0; }
-        .subtitle { font-size: 0.85rem; color: #64748b; margin: 0 0 2rem; }
-        label { display: block; font-size: 0.8rem; color: #94a3b8; margin-bottom: 0.35rem; }
-        .hint { font-size: 0.75rem; color: #64748b; margin-top: -0.7rem; margin-bottom: 1rem; }
+        .badge-dot { width: 6px; height: 6px; border-radius: 3px; background: #9a6b14; }
+        .card {
+            background: #ffffff;
+            border: 1px solid rgba(26, 24, 21, 0.08);
+            border-radius: 12px;
+            padding: 2rem;
+        }
+        .header-row { display: flex; align-items: center; gap: 0.875rem; margin-bottom: 0.375rem; }
+        .brand-mark {
+            width: 40px; height: 40px;
+            border-radius: 8px;
+            background: #1f5b4c;
+            color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+        }
+        h1 { font-size: 1.375rem; font-weight: 600; letter-spacing: -0.025em; margin: 0; color: #1a1815; }
+        .subtitle { font-size: 0.78125rem; color: #5a544c; margin: 0.125rem 0 0; }
+
+        .info {
+            display: flex; gap: 0.75rem;
+            background: #e8f0ec;
+            border: 1px solid rgba(31, 91, 76, 0.25);
+            border-radius: 10px;
+            padding: 0.75rem 0.875rem;
+            margin: 1.25rem 0;
+            font-size: 0.78125rem;
+            color: #5a544c;
+            line-height: 1.5;
+        }
+        .info svg { color: #1f5b4c; flex-shrink: 0; margin-top: 1px; }
+        .info strong { color: #1a1815; font-weight: 600; }
+
+        label {
+            display: block; font-size: 0.71875rem; color: #5a544c;
+            font-weight: 500; margin-bottom: 0.375rem; letter-spacing: 0.01em;
+        }
         input {
             width: 100%;
-            padding: 0.7rem 0.875rem;
-            background: #22263a;
-            border: 1px solid rgba(255,255,255,0.1);
+            padding: 0.625rem 0.75rem;
+            background: #ffffff;
+            border: 1px solid rgba(26, 24, 21, 0.16);
             border-radius: 8px;
-            color: #e2e8f0;
-            font-size: 0.9rem;
-            margin-bottom: 0.5rem;
+            color: #1a1815;
+            font-size: 0.875rem;
+            font-family: inherit;
+            margin-bottom: 0.25rem;
             outline: none;
-            transition: border-color 0.15s ease;
+            min-height: 40px;
+            transition: border-color 0.12s, box-shadow 0.12s;
         }
-        input:focus { border-color: #4f8ef7; box-shadow: 0 0 0 3px rgba(79,142,247,0.2); }
+        input::placeholder { color: #8d877d; }
+        input:focus {
+            border-color: #1f5b4c;
+            box-shadow: 0 0 0 3px rgba(31, 91, 76, 0.08);
+        }
+        .hint { font-size: 0.6875rem; color: #8d877d; margin: 0.25rem 0 0.875rem; }
+        .field { margin-bottom: 0.875rem; }
+
         .error {
-            background: rgba(248,113,113,0.1);
-            border: 1px solid rgba(248,113,113,0.3);
+            display: flex; align-items: center; gap: 0.625rem;
+            background: #fbe9e4;
+            border: 1px solid rgba(176, 68, 50, 0.28);
             border-radius: 8px;
-            padding: 0.75rem 1rem;
-            color: #fca5a5;
-            font-size: 0.85rem;
+            padding: 0.625rem 0.75rem;
+            color: #b04432;
+            font-size: 0.8125rem;
             margin-bottom: 1rem;
         }
         button {
             width: 100%;
-            padding: 0.8rem;
-            background: #4f8ef7;
-            border: none;
+            padding: 0.75rem;
+            background: #1f5b4c;
+            border: 1px solid #1f5b4c;
             border-radius: 8px;
             color: white;
-            font-size: 0.9rem;
-            font-weight: 600;
+            font-size: 0.9375rem;
+            font-weight: 500;
+            font-family: inherit;
             cursor: pointer;
-            transition: background 0.12s ease, transform 0.1s ease;
             margin-top: 0.5rem;
+            min-height: 48px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            transition: background 0.12s, transform 0.08s;
         }
-        button:hover { background: #6aa3ff; }
-        button:active { transform: scale(0.96); }
-        .info {
-            background: rgba(79,142,247,0.08);
-            border: 1px solid rgba(79,142,247,0.2);
-            border-radius: 10px;
-            padding: 0.875rem 1rem;
-            font-size: 0.82rem;
-            color: #93c5fd;
-            margin-bottom: 1.5rem;
-            line-height: 1.5;
+        button:hover { background: #2a6f5e; border-color: #2a6f5e; }
+        button:active { transform: scale(0.97); }
+
+        .footer {
+            margin-top: 1.125rem;
+            text-align: center;
+            font-size: 0.6875rem;
+            color: #8d877d;
+        }
+        .footer .endpoint { color: #5a544c; font-variant-numeric: tabular-nums; }
+
+        @@media (max-width: 480px) {
+            .page { padding: 1rem; }
+            .wrap { max-width: 100%; }
+            .card { padding: 1.25rem; border-radius: 10px; }
+            .header-row { gap: 0.625rem; }
+            .brand-mark { width: 36px; height: 36px; }
+            .brand-mark svg { width: 20px; height: 20px; }
+            h1 { font-size: 1.1875rem; }
+            .subtitle { font-size: 0.75rem; }
+            .info { font-size: 0.75rem; padding: 0.625rem 0.75rem; }
         }
     </style>
 </head>
 <body>
 <div class="page">
-    <div class="card">
-        <div class="badge-new">Ersteinrichtung</div>
-        <h1>Admin-Konto anlegen</h1>
-        <p class="subtitle">Wird nur einmalig aufgerufen. Danach ist der Zugang gesperrt.</p>
-
-        <div class="info">
-            Dieses Konto gehört dem Praxisinhaber / der Praxisinhaberin. Nach der Einrichtung
-            können Mitarbeiter und Arbeitszeiten verwaltet werden.
+    <div class="wrap">
+        <div class="badge-row">
+            <span class="badge-new">
+                <span class="badge-dot"></span>
+                Ersteinrichtung
+            </span>
         </div>
 
-        @if (!string.IsNullOrEmpty(Model.ErrorMessage))
-        {
-            <div class="error">@Model.ErrorMessage</div>
-        }
+        <div class="card">
+            <div class="header-row">
+                <div class="brand-mark">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1>Admin-Konto anlegen</h1>
+                    <p class="subtitle">Schritt 1 von 1 · Zeiterfassung Arztpraxis</p>
+                </div>
+            </div>
 
-        <form method="post">
-            @Html.AntiForgeryToken()
+            <div class="info">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 4l9 16H3L12 4z"/><path d="M12 10v4M12 17v.5"/>
+                </svg>
+                <div>
+                    <strong>Wird nur einmalig aufgerufen.</strong> Diese Seite ist nach Abschluss
+                    nicht mehr erreichbar. Bewahren Sie die Zugangsdaten sicher auf — sie können nicht
+                    über die App zurückgesetzt werden.
+                </div>
+            </div>
 
-            <label for="username">Benutzername</label>
-            <input id="username" name="Username" type="text" autocomplete="username"
-                   value="@Model.Username" placeholder="z.B. kurdy" autofocus required />
-            <p class="hint">Kleinbuchstaben, kein Leerzeichen.</p>
+            @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+            {
+                <div class="error">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 4l9 16H3L12 4z"/><path d="M12 10v4M12 17v.5"/>
+                    </svg>
+                    @Model.ErrorMessage
+                </div>
+            }
 
-            <label for="displayName">Anzeigename (optional)</label>
-            <input id="displayName" name="DisplayName" type="text"
-                   value="@Model.DisplayName" placeholder="z.B. Dr. Kurdy" />
-            <p class="hint">Erscheint im Admin-Bereich.</p>
+            <form method="post">
+                @Html.AntiForgeryToken()
 
-            <label for="password">Passwort</label>
-            <input id="password" name="Password" type="password" autocomplete="new-password"
-                   placeholder="Mind. 10 Zeichen, 1 Großbuchstabe, 1 Zahl" required />
+                <div class="field">
+                    <label for="username">Benutzername *</label>
+                    <input id="username" name="Username" type="text" autocomplete="username"
+                           value="@Model.Username" placeholder="z.B. b.schmitt" autofocus required />
+                    <p class="hint">3–32 Zeichen, nur a-z, 0-9, Punkt, Bindestrich.</p>
+                </div>
 
-            <label for="confirm">Passwort bestätigen</label>
-            <input id="confirm" name="Confirm" type="password" autocomplete="new-password" required />
+                <div class="field">
+                    <label for="displayName">Anzeigename (optional)</label>
+                    <input id="displayName" name="DisplayName" type="text"
+                           value="@Model.DisplayName" placeholder="Dr. Beate Schmitt" />
+                </div>
 
-            <button type="submit">Konto erstellen &amp; einloggen</button>
-        </form>
+                <div class="field">
+                    <label for="password">Passwort *</label>
+                    <input id="password" name="Password" type="password" autocomplete="new-password"
+                           placeholder="Mind. 10 Zeichen, 1 Großbuchstabe, 1 Zahl" required />
+                </div>
+
+                <div class="field">
+                    <label for="confirm">Passwort bestätigen *</label>
+                    <input id="confirm" name="Confirm" type="password" autocomplete="new-password" required />
+                </div>
+
+                <button type="submit">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M5 12l5 5 9-10"/>
+                    </svg>
+                    Admin-Konto anlegen &amp; Setup abschließen
+                </button>
+            </form>
+        </div>
+
+        <div class="footer">
+            Nach Setup: Anmeldung unter <span class="endpoint">/login</span>
+        </div>
     </div>
 </div>
 </body>

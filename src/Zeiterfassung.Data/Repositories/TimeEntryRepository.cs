@@ -18,8 +18,16 @@ public class TimeEntryRepository : ITimeEntryRepository
 
     public async Task<string> GetPrevHashAsync(long entryId, int employeeId)
     {
+        // GoBD: one global chain across ALL employees — every stamp chains
+        // to the previous one no matter who made it. Per-employee chaining
+        // would let an attacker insert/swap entries for one employee
+        // without breaking that employee's chain, and would also confuse
+        // HashChainService.VerifyTimeEntryChainAsync (which iterates the
+        // entire ordered list as a single chain). The employeeId
+        // parameter is kept for API stability but intentionally ignored.
+        _ = employeeId;
         var prev = await _db.TimeEntries
-            .Where(e => e.EmployeeId == employeeId && e.Id < entryId)
+            .Where(e => e.Id < entryId)
             .OrderByDescending(e => e.Id)
             .FirstOrDefaultAsync();
         return prev?.Hash ?? HashChainService.GenesisHash;

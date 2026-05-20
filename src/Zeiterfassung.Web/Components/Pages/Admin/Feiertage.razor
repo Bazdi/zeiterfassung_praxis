@@ -6,91 +6,145 @@
 <PageTitle>Feiertage — Admin</PageTitle>
 
 <h1>Feiertage</h1>
-<p class="lead">Automatisch aus der Nager.Date-Bibliothek laden oder manuell pflegen.</p>
+<p class="lead">Gesetzliche Feiertage importieren oder manuell pflegen — werden bei der Soll-Stunden-Berechnung berücksichtigt.</p>
 
 <div class="card mb-4">
     <div class="card-body">
-        <div class="d-flex align-items-end gap-3 flex-wrap">
-            <div>
-                <label class="form-label">Jahr laden</label>
-                <input type="number" class="form-control" style="width:120px" @bind="_importYear" min="2024" max="2030" />
+        <div class="feiertage-importer">
+            <div class="feiertage-field">
+                <label class="form-label" for="ft-year">Jahr</label>
+                <input id="ft-year" type="number" class="form-control" style="width:120px"
+                       @bind="_importYear" min="2024" max="2030" />
             </div>
-            <div>
-                <label class="form-label">Bundesland</label>
-                <select class="form-select" @bind="_bundesland">
-                    <option value="NW">NW — Nordrhein-Westfalen</option>
-                    <option value="BY">BY — Bayern</option>
-                    <option value="BW">BW — Baden-Württemberg</option>
-                    <option value="BE">BE — Berlin</option>
-                    <option value="BB">BB — Brandenburg</option>
-                    <option value="HB">HB — Bremen</option>
-                    <option value="HH">HH — Hamburg</option>
-                    <option value="HE">HE — Hessen</option>
-                    <option value="MV">MV — Mecklenburg-Vorpommern</option>
-                    <option value="NI">NI — Niedersachsen</option>
-                    <option value="RP">RP — Rheinland-Pfalz</option>
-                    <option value="SL">SL — Saarland</option>
-                    <option value="SN">SN — Sachsen</option>
-                    <option value="ST">ST — Sachsen-Anhalt</option>
-                    <option value="SH">SH — Schleswig-Holstein</option>
-                    <option value="TH">TH — Thüringen</option>
+            <div class="feiertage-field" style="min-width:280px;flex:1">
+                <label class="form-label" for="ft-state">Bundesland</label>
+                <select id="ft-state" class="form-select" @bind="_bundesland">
+                    @foreach (var bl in _bundeslaender)
+                    {
+                        <option value="@bl.Code">@bl.Code — @bl.Name</option>
+                    }
                 </select>
             </div>
             <button class="btn btn-primary" @onclick="ImportHolidays" disabled="@_loading">
-                Feiertage importieren
+                @if (_loading)
+                {
+                    <span class="spinner-border spinner-border-sm me-2"></span>
+                }
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                     stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="margin-right:0.375rem">
+                    <path d="M12 4v12"/><path d="M6 12l6 6 6-6"/><path d="M4 20h16"/>
+                </svg>
+                Importieren
             </button>
         </div>
         @if (_message != null)
         {
-            <div class="alert @(_isError ? "alert-danger" : "alert-success") mt-3 py-2">@_message</div>
+            <div class="alert @(_isError ? "alert-danger" : "alert-success") mt-3 py-2 mb-0">@_message</div>
         }
     </div>
 </div>
 
-<h2>Gespeicherte Feiertage (@_holidays.Count)</h2>
+<div class="d-flex justify-content-between align-items-end mb-2">
+    <h2 style="font-size:1.05rem;margin:0">Gespeicherte Feiertage <span style="color:var(--text-muted);font-weight:400">· @_holidays.Count</span></h2>
+    @if (_holidays.Count > 0)
+    {
+        <div class="d-flex gap-2 flex-wrap">
+            <span class="z-chip @(_filterYear == 0 ? "active" : "")" @onclick="() => _filterYear = 0">Alle</span>
+            @foreach (var year in _holidays.Select(h => h.Date.Year).Distinct().OrderByDescending(y => y))
+            {
+                <span class="z-chip @(_filterYear == year ? "active" : "")" @onclick="() => _filterYear = year">@year</span>
+            }
+        </div>
+    }
+</div>
 
 @if (_holidays.Count == 0)
 {
-    <p class="text-muted">Noch keine Feiertage hinterlegt.</p>
+    <div class="z-empty">
+        <div style="font-size:1.625rem;margin-bottom:0.5rem;color:var(--text-muted)">📅</div>
+        Noch keine Feiertage hinterlegt. Wähle oben ein Jahr und Bundesland und klicke <strong>Importieren</strong>.
+    </div>
 }
 else
 {
-    <div class="d-flex gap-2 mb-3 flex-wrap">
-        @foreach (var year in _holidays.Select(h => h.Date.Year).Distinct().OrderBy(y => y))
-        {
-            <button class="btn btn-sm @(_filterYear == year ? "btn-primary" : "btn-outline-secondary")"
-                    @onclick="() => _filterYear = year">@year</button>
-        }
-        <button class="btn btn-sm @(_filterYear == 0 ? "btn-primary" : "btn-outline-secondary")"
-                @onclick="() => _filterYear = 0">Alle</button>
-    </div>
-
-    <table class="table table-sm">
-        <thead>
-            <tr><th>Datum</th><th>Name</th><th>Bundesland</th></tr>
-        </thead>
-        <tbody>
-            @foreach (var h in _holidays.Where(h => _filterYear == 0 || h.Date.Year == _filterYear)
-                                        .OrderBy(h => h.Date))
-            {
+    <div class="card" style="overflow:hidden">
+        <table class="table">
+            <thead>
                 <tr>
-                    <td style="font-variant-numeric:tabular-nums">@h.Date.ToString("ddd dd.MM.yyyy")</td>
-                    <td>@h.Name</td>
-                    <td>@(h.State ?? "bundesweit")</td>
+                    <th style="width:140px">Datum</th>
+                    <th>Name</th>
+                    <th style="width:160px">Geltung</th>
                 </tr>
-            }
-        </tbody>
-    </table>
+            </thead>
+            <tbody>
+                @foreach (var h in _holidays.Where(h => _filterYear == 0 || h.Date.Year == _filterYear)
+                                            .OrderBy(h => h.Date))
+                {
+                    <tr>
+                        <td class="tabular-nums" style="white-space:nowrap">
+                            <strong>@h.Date.ToString("dd.MM.yyyy")</strong>
+                            <span style="color:var(--text-muted);margin-left:0.5rem;font-size:0.75rem">
+                                @h.Date.ToString("dddd", new System.Globalization.CultureInfo("de-DE")).Substring(0, 2)
+                            </span>
+                        </td>
+                        <td><strong style="font-weight:500">@h.Name</strong></td>
+                        <td>
+                            @if (h.State is null)
+                            {
+                                <span class="badge bg-primary">Bundesweit</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">@h.State</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
 }
+
+<style>
+    .feiertage-importer {
+        display: flex;
+        align-items: flex-end;
+        gap: 1rem;
+        flex-wrap: wrap;
+    }
+    .feiertage-field { display: flex; flex-direction: column; }
+    .feiertage-importer .btn { min-height: 38px; }
+</style>
 
 @code {
     private int _importYear = DateTime.Now.Year;
-    private string _bundesland = "NW";
+    private string _bundesland = "HH";
     private bool _loading;
     private string? _message;
     private bool _isError;
     private List<Holiday> _holidays = new();
     private int _filterYear = DateTime.Now.Year;
+
+    private sealed record Bl(string Code, string Name);
+    private static readonly Bl[] _bundeslaender =
+    {
+        new("HH", "Hamburg"),
+        new("BW", "Baden-Württemberg"),
+        new("BY", "Bayern"),
+        new("BE", "Berlin"),
+        new("BB", "Brandenburg"),
+        new("HB", "Bremen"),
+        new("HE", "Hessen"),
+        new("MV", "Mecklenburg-Vorpommern"),
+        new("NI", "Niedersachsen"),
+        new("NW", "Nordrhein-Westfalen"),
+        new("RP", "Rheinland-Pfalz"),
+        new("SL", "Saarland"),
+        new("SN", "Sachsen"),
+        new("ST", "Sachsen-Anhalt"),
+        new("SH", "Schleswig-Holstein"),
+        new("TH", "Thüringen"),
+    };
 
     protected override async Task OnInitializedAsync()
     {
@@ -105,18 +159,15 @@ else
 
         try
         {
-            var countryCode = Nager.Date.CountryCode.DE;
-            var publicHolidays = Nager.Date.HolidaySystem.GetHolidays(_importYear, countryCode);
+            var publicHolidays = Nager.Date.HolidaySystem.GetHolidays(_importYear, Nager.Date.CountryCode.DE);
 
             int added = 0;
             foreach (var holiday in publicHolidays)
             {
-                // Skip state-specific holidays not matching selected Bundesland
                 if (holiday.SubdivisionCodes != null && holiday.SubdivisionCodes.Length > 0)
                 {
                     var matchCode = $"DE-{_bundesland}";
-                    if (!holiday.SubdivisionCodes.Contains(matchCode))
-                        continue;
+                    if (!holiday.SubdivisionCodes.Contains(matchCode)) continue;
                 }
 
                 var existing = await Db.Holidays
@@ -134,12 +185,15 @@ else
 
             await Db.SaveChangesAsync();
             _holidays = await Db.Holidays.OrderBy(h => h.Date).ToListAsync();
-            _message = $"{added} Feiertage für {_importYear} ({_bundesland}) importiert.";
+            _message = added == 0
+                ? $"Keine neuen Feiertage für {_importYear} ({_bundesland}) — alle bereits hinterlegt."
+                : $"✓ {added} Feiertage für {_importYear} ({_bundesland}) importiert.";
             _isError = false;
+            _filterYear = _importYear;
         }
         catch (Exception ex)
         {
-            _message = $"Fehler: {ex.Message}";
+            _message = $"Fehler beim Import: {ex.Message}";
             _isError = true;
         }
         finally
