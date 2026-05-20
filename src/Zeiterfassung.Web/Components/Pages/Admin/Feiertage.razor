@@ -1,0 +1,150 @@
+@page "/admin/feiertage"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject ZeiterfassungDbContext Db
+
+<PageTitle>Feiertage — Admin</PageTitle>
+
+<h1>Feiertage</h1>
+<p class="lead">Automatisch aus der Nager.Date-Bibliothek laden oder manuell pflegen.</p>
+
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="d-flex align-items-end gap-3 flex-wrap">
+            <div>
+                <label class="form-label">Jahr laden</label>
+                <input type="number" class="form-control" style="width:120px" @bind="_importYear" min="2024" max="2030" />
+            </div>
+            <div>
+                <label class="form-label">Bundesland</label>
+                <select class="form-select" @bind="_bundesland">
+                    <option value="NW">NW — Nordrhein-Westfalen</option>
+                    <option value="BY">BY — Bayern</option>
+                    <option value="BW">BW — Baden-Württemberg</option>
+                    <option value="BE">BE — Berlin</option>
+                    <option value="BB">BB — Brandenburg</option>
+                    <option value="HB">HB — Bremen</option>
+                    <option value="HH">HH — Hamburg</option>
+                    <option value="HE">HE — Hessen</option>
+                    <option value="MV">MV — Mecklenburg-Vorpommern</option>
+                    <option value="NI">NI — Niedersachsen</option>
+                    <option value="RP">RP — Rheinland-Pfalz</option>
+                    <option value="SL">SL — Saarland</option>
+                    <option value="SN">SN — Sachsen</option>
+                    <option value="ST">ST — Sachsen-Anhalt</option>
+                    <option value="SH">SH — Schleswig-Holstein</option>
+                    <option value="TH">TH — Thüringen</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" @onclick="ImportHolidays" disabled="@_loading">
+                Feiertage importieren
+            </button>
+        </div>
+        @if (_message != null)
+        {
+            <div class="alert @(_isError ? "alert-danger" : "alert-success") mt-3 py-2">@_message</div>
+        }
+    </div>
+</div>
+
+<h2>Gespeicherte Feiertage (@_holidays.Count)</h2>
+
+@if (_holidays.Count == 0)
+{
+    <p class="text-muted">Noch keine Feiertage hinterlegt.</p>
+}
+else
+{
+    <div class="d-flex gap-2 mb-3 flex-wrap">
+        @foreach (var year in _holidays.Select(h => h.Date.Year).Distinct().OrderBy(y => y))
+        {
+            <button class="btn btn-sm @(_filterYear == year ? "btn-primary" : "btn-outline-secondary")"
+                    @onclick="() => _filterYear = year">@year</button>
+        }
+        <button class="btn btn-sm @(_filterYear == 0 ? "btn-primary" : "btn-outline-secondary")"
+                @onclick="() => _filterYear = 0">Alle</button>
+    </div>
+
+    <table class="table table-sm">
+        <thead>
+            <tr><th>Datum</th><th>Name</th><th>Bundesland</th></tr>
+        </thead>
+        <tbody>
+            @foreach (var h in _holidays.Where(h => _filterYear == 0 || h.Date.Year == _filterYear)
+                                        .OrderBy(h => h.Date))
+            {
+                <tr>
+                    <td style="font-variant-numeric:tabular-nums">@h.Date.ToString("ddd dd.MM.yyyy")</td>
+                    <td>@h.Name</td>
+                    <td>@(h.State ?? "bundesweit")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private int _importYear = DateTime.Now.Year;
+    private string _bundesland = "NW";
+    private bool _loading;
+    private string? _message;
+    private bool _isError;
+    private List<Holiday> _holidays = new();
+    private int _filterYear = DateTime.Now.Year;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _holidays = await Db.Holidays.OrderBy(h => h.Date).ToListAsync();
+    }
+
+    private async Task ImportHolidays()
+    {
+        _loading = true;
+        _message = null;
+        StateHasChanged();
+
+        try
+        {
+            var countryCode = Nager.Date.CountryCode.DE;
+            var publicHolidays = Nager.Date.HolidaySystem.GetHolidays(_importYear, countryCode);
+
+            int added = 0;
+            foreach (var holiday in publicHolidays)
+            {
+                // Skip state-specific holidays not matching selected Bundesland
+                if (holiday.SubdivisionCodes != null && holiday.SubdivisionCodes.Length > 0)
+                {
+                    var matchCode = $"DE-{_bundesland}";
+                    if (!holiday.SubdivisionCodes.Contains(matchCode))
+                        continue;
+                }
+
+                var existing = await Db.Holidays
+                    .AnyAsync(h => h.Date == holiday.Date && (h.State == _bundesland || h.State == null));
+                if (existing) continue;
+
+                Db.Holidays.Add(new Holiday
+                {
+                    Date = holiday.Date,
+                    Name = holiday.LocalName,
+                    State = holiday.SubdivisionCodes?.Length > 0 ? _bundesland : null
+                });
+                added++;
+            }
+
+            await Db.SaveChangesAsync();
+            _holidays = await Db.Holidays.OrderBy(h => h.Date).ToListAsync();
+            _message = $"{added} Feiertage für {_importYear} ({_bundesland}) importiert.";
+            _isError = false;
+        }
+        catch (Exception ex)
+        {
+            _message = $"Fehler: {ex.Message}";
+            _isError = true;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

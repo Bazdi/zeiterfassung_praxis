@@ -1,0 +1,245 @@
+@page "/selfservice/korrektur"
+@rendermode InteractiveServer
+@inject ZeiterfassungDbContext Db
+@inject PinAuthenticationService PinAuth
+
+<PageTitle>Korrekturantrag — Zeiterfassung</PageTitle>
+
+<h1>Korrekturantrag stellen</h1>
+<p class="lead">Vergessene oder falsche Stempelung nachmelden. Der Admin muss den Antrag genehmigen.</p>
+
+@if (_phase == Phase.SelectEmployee)
+{
+    <div class="card" style="max-width:420px">
+        <div class="card-body">
+            <h5 class="card-title">Mitarbeiter auswählen</h5>
+            <select class="form-select mb-3" @onchange="OnEmployeeSelected">
+                <option value="">— bitte wählen —</option>
+                @foreach (var emp in _employees)
+                {
+                    <option value="@emp.Id">@emp.LastName, @emp.FirstName</option>
+                }
+            </select>
+        </div>
+    </div>
+}
+
+@if (_phase == Phase.EnterPin)
+{
+    <div class="card" style="max-width:420px">
+        <div class="card-body">
+            <h5 class="card-title">PIN bestätigen — @_employee!.LastName, @_employee.FirstName</h5>
+            <input type="password" class="form-control mb-2" maxlength="6" inputmode="numeric"
+                   placeholder="6-stellige PIN"
+                   @bind="_pin" @bind:event="oninput" @onkeyup="OnPinKeyUp" />
+            @if (_pinError != null)
+            {
+                <div class="alert alert-danger py-2">@_pinError</div>
+            }
+            <div class="d-flex gap-2 mt-2">
+                <button class="btn btn-primary" @onclick="VerifyPin">PIN bestätigen</button>
+                <button class="btn btn-outline-secondary" @onclick="Reset">Zurück</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_phase == Phase.FillForm)
+{
+    <div class="card" style="max-width:540px">
+        <div class="card-body">
+            <h5 class="card-title">Antrag — @_employee!.LastName, @_employee.FirstName</h5>
+
+            <div class="mb-3">
+                <label class="form-label">Typ der Stempelung *</label>
+                <select class="form-select" @bind="_reqType">
+                    <option value="@TimeEntryType.Kommen">Kommen</option>
+                    <option value="@TimeEntryType.Gehen">Gehen</option>
+                    <option value="@TimeEntryType.PauseStart">Pause Start</option>
+                    <option value="@TimeEntryType.PauseEnd">Pause Ende</option>
+                </select>
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Datum & Uhrzeit *</label>
+                <input type="datetime-local" class="form-control" @bind="_reqTimestamp" />
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label">Begründung *</label>
+                <textarea class="form-control" rows="3" maxlength="500"
+                          placeholder="z.B. Vergessen zu stempeln wegen Notfallpatient"
+                          @bind="_reqReason"></textarea>
+                <div class="form-text">@(_reqReason?.Length ?? 0)/500 Zeichen</div>
+            </div>
+
+            @if (_formError != null)
+            {
+                <div class="alert alert-danger py-2">@_formError</div>
+            }
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-success" @onclick="Submit" disabled="@_submitting">Antrag senden</button>
+                <button class="btn btn-outline-secondary" @onclick="Reset">Abbrechen</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_phase == Phase.Success)
+{
+    <div class="card border-success" style="max-width:420px">
+        <div class="card-body text-center py-4">
+            <div style="font-size:2.5rem;color:#4ade80;margin-bottom:1rem">✓</div>
+            <h5>Antrag eingereicht!</h5>
+            <p class="text-muted">Der Admin wird den Antrag prüfen und genehmigen oder ablehnen.</p>
+            <button class="btn btn-outline-secondary mt-2" @onclick="Reset">Weiteren Antrag stellen</button>
+        </div>
+    </div>
+}
+
+<div class="mt-4">
+    <h2>Meine offenen Anträge</h2>
+    @if (_myRequests.Count == 0)
+    {
+        <p class="text-muted">Keine Anträge vorhanden.</p>
+    }
+    else
+    {
+        <table class="table table-sm">
+            <thead>
+                <tr><th>Zeitpunkt</th><th>Typ</th><th>Begründung</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _myRequests)
+                {
+                    <tr>
+                        <td style="font-variant-numeric:tabular-nums">@r.RequestedTimestamp.ToLocalTime().ToString("dd.MM. HH:mm")</td>
+                        <td>@GetLabel(r.Type)</td>
+                        <td>@r.Reason</td>
+                        <td>
+                            @if (r.Status == CorrectionStatus.Open)
+                            {
+                                <span class="badge bg-warning">Offen</span>
+                            }
+                            else if (r.Status == CorrectionStatus.Approved)
+                            {
+                                <span class="badge bg-success">Genehmigt</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-danger">Abgelehnt</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    private enum Phase { SelectEmployee, EnterPin, FillForm, Success }
+    private Phase _phase = Phase.SelectEmployee;
+    private List<Employee> _employees = new();
+    private Employee? _employee;
+    private string _pin = "";
+    private string? _pinError;
+    private TimeEntryType _reqType = TimeEntryType.Kommen;
+    private DateTime _reqTimestamp = DateTime.Now.AddHours(-1);
+    private string _reqReason = "";
+    private string? _formError;
+    private bool _submitting;
+    private List<CorrectionRequest> _myRequests = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await Db.Employees
+            .Where(e => e.IsActive)
+            .OrderBy(e => e.LastName)
+            .ToListAsync();
+    }
+
+    private void OnEmployeeSelected(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var id)) return;
+        _employee = _employees.FirstOrDefault(x => x.Id == id);
+        if (_employee != null) _phase = Phase.EnterPin;
+    }
+
+    private async Task OnPinKeyUp(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && _pin.Length == 6) await VerifyPin();
+    }
+
+    private async Task VerifyPin()
+    {
+        if (_employee == null) return;
+        var emp = await Db.Employees.FindAsync(_employee.Id);
+        if (emp == null) return;
+
+        var result = PinAuth.Authenticate(emp, _pin);
+        await Db.SaveChangesAsync();
+
+        if (!result.Success)
+        {
+            _pin = "";
+            _pinError = result.RequiresAdminReset
+                ? "Account gesperrt — Admin kontaktieren."
+                : result.LockoutRemainingSeconds.HasValue
+                    ? $"Gesperrt für {result.LockoutRemainingSeconds}s."
+                    : $"Falsche PIN. Noch {result.RemainingAttempts} Versuche.";
+            return;
+        }
+
+        _pinError = null;
+        _phase = Phase.FillForm;
+        _myRequests = await Db.CorrectionRequests
+            .Where(r => r.EmployeeId == _employee.Id)
+            .OrderByDescending(r => r.CreatedAt)
+            .Take(10)
+            .ToListAsync();
+    }
+
+    private async Task Submit()
+    {
+        _formError = null;
+        if (string.IsNullOrWhiteSpace(_reqReason)) { _formError = "Bitte Begründung angeben."; return; }
+        if (_reqTimestamp > DateTime.Now) { _formError = "Zeitpunkt darf nicht in der Zukunft liegen."; return; }
+
+        _submitting = true;
+        var req = new CorrectionRequest
+        {
+            EmployeeId = _employee!.Id,
+            RequestedTimestamp = _reqTimestamp.ToUniversalTime(),
+            Type = _reqType,
+            Reason = _reqReason.Trim(),
+            Status = CorrectionStatus.Open,
+            CreatedAt = DateTime.UtcNow
+        };
+        Db.CorrectionRequests.Add(req);
+        await Db.SaveChangesAsync();
+        _submitting = false;
+        _phase = Phase.Success;
+    }
+
+    private void Reset()
+    {
+        _phase = Phase.SelectEmployee;
+        _employee = null;
+        _pin = "";
+        _pinError = null;
+        _reqReason = "";
+        _formError = false ? "" : null;
+        _myRequests = new();
+    }
+
+    private string GetLabel(TimeEntryType t) => t switch
+    {
+        TimeEntryType.Kommen => "Kommen",
+        TimeEntryType.Gehen => "Gehen",
+        TimeEntryType.PauseStart => "Pause Start",
+        TimeEntryType.PauseEnd => "Pause Ende",
+        _ => t.ToString()
+    };
+}

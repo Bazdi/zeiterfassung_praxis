@@ -1,0 +1,203 @@
+@page "/admin/sollstunden"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject ZeiterfassungDbContext Db
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Soll-Stunden — Admin</PageTitle>
+
+<h1>Soll-Stunden & Arbeitszeitmodelle</h1>
+<p class="lead">Vertragshistorie der Mitarbeiter — append-only, jede Änderung erzeugt einen neuen Eintrag.</p>
+
+<div class="mb-3">
+    <label class="form-label">Mitarbeiter</label>
+    <select class="form-select w-auto d-inline-block ms-2" @onchange="OnEmployeeChanged">
+        <option value="">— bitte wählen —</option>
+        @foreach (var emp in _employees)
+        {
+            <option value="@emp.Id">@emp.LastName, @emp.FirstName</option>
+        }
+    </select>
+</div>
+
+@if (_employee != null)
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">Neues Arbeitszeitmodell für @_employee.LastName, @_employee.FirstName</h5>
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Gültig ab *</label>
+                    <input type="date" class="form-control" @bind="_newFrom" />
+                </div>
+                <div class="col-12">
+                    <div class="hours-grid">
+                        @foreach (var day in _days)
+                        {
+                            <div class="day-input">
+                                <label class="form-label">@day.Label</label>
+                                <input type="number" class="form-control" min="0" max="12" step="0.5"
+                                       value="@day.Hours"
+                                       @onchange="e => day.Hours = decimal.TryParse(e.Value?.ToString(), out var h) ? h : 0" />
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="weekly-total">
+                        Wochensumme: <strong>@_days.Sum(d => d.Hours).ToString("F1") h</strong>
+                    </div>
+                </div>
+            </div>
+            @if (_formError != null)
+            {
+                <div class="alert alert-danger mt-3">@_formError</div>
+            }
+            <div class="mt-3">
+                <button class="btn btn-success" @onclick="SavePattern">Modell speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <h2>Vertragshistorie</h2>
+    @if (!_patterns.Any())
+    {
+        <p class="text-muted">Noch kein Arbeitszeitmodell hinterlegt.</p>
+    }
+    else
+    {
+        <table class="table table-sm">
+            <thead>
+                <tr>
+                    <th>Gültig ab</th>
+                    <th>Gültig bis</th>
+                    <th>Mo</th><th>Di</th><th>Mi</th><th>Do</th><th>Fr</th><th>Sa</th><th>So</th>
+                    <th>Woche</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var p in _patterns.OrderByDescending(p => p.ValidFrom))
+                {
+                    <tr class="@(p.ValidUntil == null ? "table-active" : "")">
+                        <td style="font-variant-numeric:tabular-nums">@p.ValidFrom.ToString("dd.MM.yyyy")</td>
+                        <td style="font-variant-numeric:tabular-nums">@(p.ValidUntil?.ToString("dd.MM.yyyy") ?? "aktuell")</td>
+                        <td>@p.MondayHours</td>
+                        <td>@p.TuesdayHours</td>
+                        <td>@p.WednesdayHours</td>
+                        <td>@p.ThursdayHours</td>
+                        <td>@p.FridayHours</td>
+                        <td>@p.SaturdayHours</td>
+                        <td>@p.SundayHours</td>
+                        <td><strong>@((p.MondayHours+p.TuesdayHours+p.WednesdayHours+p.ThursdayHours+p.FridayHours+p.SaturdayHours+p.SundayHours).ToString("F1"))</strong></td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+<style>
+    .hours-grid {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 0.75rem;
+    }
+    .day-input .form-label { font-size: 0.78rem; text-align: center; display: block; }
+    .day-input .form-control { text-align: center; font-variant-numeric: tabular-nums; }
+    .weekly-total { font-size: 0.9rem; color: #94a3b8; }
+    .table-active td { background: rgba(79,142,247,0.08) !important; }
+</style>
+
+@code {
+    private List<Employee> _employees = new();
+    private Employee? _employee;
+    private List<WorkingTimePattern> _patterns = new();
+    private DateTime _newFrom = DateTime.Today;
+    private string? _formError;
+    private int _adminUserId;
+
+    private List<DayEntry> _days = new()
+    {
+        new("Mo", 0), new("Di", 0), new("Mi", 0),
+        new("Do", 0), new("Fr", 0), new("Sa", 0), new("So", 0)
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        int.TryParse(auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out _adminUserId);
+
+        _employees = await Db.Employees
+            .Where(e => e.IsActive)
+            .OrderBy(e => e.LastName)
+            .ToListAsync();
+    }
+
+    private async Task OnEmployeeChanged(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var id)) { _employee = null; return; }
+        _employee = _employees.FirstOrDefault(x => x.Id == id);
+        _patterns = await Db.WorkingTimePatterns
+            .Where(p => p.EmployeeId == id)
+            .OrderByDescending(p => p.ValidFrom)
+            .ToListAsync();
+        ResetForm();
+    }
+
+    private async Task SavePattern()
+    {
+        _formError = null;
+        if (_employee == null) return;
+        if (_newFrom == default) { _formError = "Bitte Gültig-ab-Datum angeben."; return; }
+
+        // Close current open pattern
+        var current = _patterns.FirstOrDefault(p => p.ValidUntil == null);
+        if (current != null)
+        {
+            if (_newFrom <= current.ValidFrom)
+            {
+                _formError = "Datum muss nach dem Start des aktuellen Modells liegen.";
+                return;
+            }
+            current.ValidUntil = _newFrom.AddDays(-1);
+        }
+
+        var pattern = new WorkingTimePattern
+        {
+            EmployeeId = _employee.Id,
+            ValidFrom = _newFrom,
+            ValidUntil = null,
+            MondayHours = _days[0].Hours,
+            TuesdayHours = _days[1].Hours,
+            WednesdayHours = _days[2].Hours,
+            ThursdayHours = _days[3].Hours,
+            FridayHours = _days[4].Hours,
+            SaturdayHours = _days[5].Hours,
+            SundayHours = _days[6].Hours,
+            CreatedAt = DateTime.UtcNow,
+            CreatedByUserId = _adminUserId
+        };
+        Db.WorkingTimePatterns.Add(pattern);
+        await Db.SaveChangesAsync();
+
+        _patterns = await Db.WorkingTimePatterns
+            .Where(p => p.EmployeeId == _employee.Id)
+            .OrderByDescending(p => p.ValidFrom)
+            .ToListAsync();
+        ResetForm();
+    }
+
+    private void ResetForm()
+    {
+        _newFrom = DateTime.Today;
+        foreach (var d in _days) d.Hours = 0;
+        _formError = null;
+    }
+
+    private class DayEntry
+    {
+        public string Label { get; }
+        public decimal Hours { get; set; }
+        public DayEntry(string label, decimal hours) { Label = label; Hours = hours; }
+    }
+}

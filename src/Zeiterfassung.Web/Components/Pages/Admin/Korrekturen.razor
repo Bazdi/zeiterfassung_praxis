@@ -214,6 +214,7 @@
         try
         {
             var entry = await StempelMgr.ApplyCorrectionAsync(req, _adminUserId, TimeEntryRepo);
+            // StempelManager already saved the TimeEntry; save the CorrectionRequest status update
             await Db.SaveChangesAsync();
             await LoadAsync();
         }

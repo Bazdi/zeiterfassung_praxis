@@ -3,8 +3,8 @@ using Zeiterfassung.Core.Models;
 namespace Zeiterfassung.Core.Services;
 
 /// <summary>
-/// Orchestrates all stamping operations: validates, chains hash, persists.
-/// All dependencies are interfaces to allow testing and DB-agnostic design.
+/// Orchestrates all stamping operations: validates sequence, chains hash, persists.
+/// The hash is computed AFTER the DB INSERT so the real auto-increment ID is in the payload.
 /// </summary>
 public class StempelManager
 {
@@ -23,64 +23,52 @@ public class StempelManager
     }
 
     /// <summary>
-    /// Creates and persists a new TimeEntry.
-    /// Returns warnings if ArbZG rules are at risk.
-    /// Throws StempelException if entry is invalid or duplicate.
+    /// Creates and persists a TimeEntry.
+    /// Hash is computed after INSERT so the real ID is included in the payload.
     /// </summary>
     public async Task<StempelResult> StempelAsync(
         StempelRequest request,
         ITimeEntryRepository repository)
     {
         var now = DateTime.UtcNow;
+        var effectiveTimestamp = request.TimestampOverrideUtc ?? now;
+        var dayStart = effectiveTimestamp.Date;
 
-        // Load existing entries for validation
-        var todayStart = now.Date;
         var existingEntries = await repository.GetByEmployeeAsync(
-            request.EmployeeId,
-            todayStart,
-            now.AddDays(1));
+            request.EmployeeId, dayStart, dayStart.AddDays(1));
 
-        // Validate sequence
         var validation = _stempelService.ValidateEntry(request.Type, existingEntries);
         if (!validation.IsValid)
             throw new StempelException(validation.Error ?? "Ungültige Stempelung");
 
-        // Duplicate check
-        if (_stempelService.IsDuplicateEntry(request.Type, now, existingEntries))
+        if (_stempelService.IsDuplicateEntry(request.Type, effectiveTimestamp, existingEntries))
             throw new StempelException("Doppelstempelung erkannt (< 5 Sekunden)");
 
-        // Get last hash from DB (must be atomic with INSERT — done inside repository)
-        var prevHash = await repository.GetLastHashAsync(request.EmployeeId)
-            ?? HashChainService.GenesisHash;
-
+        // Phase 1: insert with placeholder hash to get the real DB Id
         var entry = new TimeEntry
         {
             EmployeeId = request.EmployeeId,
             Type = request.Type,
-            TimestampUtc = request.TimestampOverrideUtc ?? now,
+            TimestampUtc = effectiveTimestamp,
             Source = request.Source,
             CorrectionOfId = request.CorrectionOfId,
             CreatedByUserId = request.CreatedByUserId,
             CreatedAtUtc = now,
-            PrevHash = prevHash,
-            Hash = string.Empty
+            PrevHash = HashChainService.GenesisHash, // temporary
+            Hash = HashChainService.GenesisHash      // temporary
         };
 
-        var (chainedPrev, hash) = await _hashChainService.ComputeAndChainAsync(entry, prevHash);
-        entry.PrevHash = chainedPrev;
-        entry.Hash = hash;
+        await repository.AddAndSaveAsync(entry); // entry.Id is set after this call
 
-        await repository.AddAsync(entry);
+        // Phase 2: now that entry.Id is known, compute correct hash under semaphore
+        var prevHash = await repository.GetPrevHashAsync(entry.Id, request.EmployeeId);
+        var (finalPrev, finalHash) = await _hashChainService.ComputeAndChainAsync(entry, prevHash);
+        await repository.UpdateHashAsync(entry, finalPrev, finalHash);
 
-        // Check ArbZG warnings (non-blocking)
         var allEntries = existingEntries.Append(entry).ToList();
         var warnings = _arbZGValidator.ValidateDay(now.Date, allEntries);
 
-        return new StempelResult
-        {
-            Entry = entry,
-            Warnings = warnings
-        };
+        return new StempelResult { Entry = entry, Warnings = warnings };
     }
 
     /// <summary>
@@ -136,7 +124,10 @@ public class StempelException : Exception
 public interface ITimeEntryRepository
 {
     Task<List<TimeEntry>> GetByEmployeeAsync(int employeeId, DateTime from, DateTime to);
-    Task<string?> GetLastHashAsync(int employeeId);
+    /// <summary>Gets the hash of the entry immediately before the given entryId for the employee.</summary>
+    Task<string> GetPrevHashAsync(long entryId, int employeeId);
+    Task AddAndSaveAsync(TimeEntry entry);
+    Task UpdateHashAsync(TimeEntry entry, string prevHash, string hash);
     Task AddAsync(TimeEntry entry);
     Task SaveAsync();
 }

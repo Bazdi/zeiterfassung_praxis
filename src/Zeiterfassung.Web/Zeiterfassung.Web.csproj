@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.11" />
+    <PackageReference Include="Nager.Date" Version="2.18.5" />
     <PackageReference Include="NodaTime" Version="3.3.2" />
     <PackageReference Include="OtpSharp" Version="1.3.0.4" />
   </ItemGroup>
@@ -15,6 +16,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Zeiterfassung.Core\Zeiterfassung.Core.csproj" />
     <ProjectReference Include="..\Zeiterfassung.Data\Zeiterfassung.Data.csproj" />
+    <ProjectReference Include="..\Zeiterfassung.Export\Zeiterfassung.Export.csproj" />
   </ItemGroup>
 
 </Project>

@@ -94,10 +94,11 @@ public class SaldoService
         if (date.DayOfWeek == IsoDayOfWeek.Saturday || date.DayOfWeek == IsoDayOfWeek.Sunday)
             return 0;
 
-        var dateUtc = date.AtStartOfDayInZone(BerlinTz).ToDateTimeUtc();
+        // Compare using local calendar date (ValidFrom is stored as calendar date, not UTC instant)
+        var localDate = new DateTime(date.Year, date.Month, date.Day);
         var pattern = patterns
-            .Where(p => p.ValidFrom.Date <= dateUtc.Date &&
-                        (!p.ValidUntil.HasValue || p.ValidUntil.Value.Date >= dateUtc.Date))
+            .Where(p => p.ValidFrom.Date <= localDate.Date &&
+                        (!p.ValidUntil.HasValue || p.ValidUntil.Value.Date >= localDate.Date))
             .OrderByDescending(p => p.ValidFrom)
             .FirstOrDefault();
 
@@ -121,8 +122,8 @@ public class SaldoService
 
     private bool IsHoliday(LocalDate date, IList<Holiday> holidays)
     {
-        var dateUtc = date.AtStartOfDayInZone(BerlinTz).ToDateTimeUtc();
-        return holidays.Any(h => h.Date.Date == dateUtc.Date);
+        var localDate = new DateTime(date.Year, date.Month, date.Day);
+        return holidays.Any(h => h.Date.Date == localDate.Date);
     }
 
     private static decimal CalculatePauseMinutes(IList<TimeEntry> dayEntries)

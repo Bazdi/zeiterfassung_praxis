@@ -1,0 +1,94 @@
+@page "/admin/einstellungen"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject ZeiterfassungDbContext Db
+@inject AdminAuthService Auth
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Einstellungen — Admin</PageTitle>
+
+<h1>Einstellungen</h1>
+
+<div class="card" style="max-width:480px">
+    <div class="card-body">
+        <h5 class="card-title">Passwort ändern</h5>
+
+        @if (_success)
+        {
+            <div class="alert alert-success">Passwort erfolgreich geändert.</div>
+        }
+        @if (_error != null)
+        {
+            <div class="alert alert-danger">@_error</div>
+        }
+
+        <div class="mb-3">
+            <label class="form-label">Aktuelles Passwort</label>
+            <input type="password" class="form-control" @bind="_currentPw" />
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Neues Passwort</label>
+            <input type="password" class="form-control" @bind="_newPw" />
+            <div class="form-text">Mind. 10 Zeichen, 1 Großbuchstabe, 1 Zahl.</div>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Neues Passwort bestätigen</label>
+            <input type="password" class="form-control" @bind="_confirmPw" />
+        </div>
+        <button class="btn btn-primary" @onclick="ChangePassword" disabled="@_busy">Passwort ändern</button>
+    </div>
+</div>
+
+@code {
+    private string _currentPw = "";
+    private string _newPw = "";
+    private string _confirmPw = "";
+    private string? _error;
+    private bool _success;
+    private bool _busy;
+
+    private async Task ChangePassword()
+    {
+        _error = null;
+        _success = false;
+        _busy = true;
+
+        if (string.IsNullOrWhiteSpace(_currentPw) || string.IsNullOrWhiteSpace(_newPw))
+        {
+            _error = "Bitte alle Felder ausfüllen.";
+            _busy = false;
+            return;
+        }
+
+        if (_newPw != _confirmPw)
+        {
+            _error = "Neue Passwörter stimmen nicht überein.";
+            _busy = false;
+            return;
+        }
+
+        if (!Auth.IsValidPassword(_newPw))
+        {
+            _error = "Neues Passwort erfüllt Anforderungen nicht (mind. 10 Zeichen, 1 Großbuchstabe, 1 Zahl).";
+            _busy = false;
+            return;
+        }
+
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        var username = authState.User.Identity?.Name;
+
+        var user = await Db.Users.FirstOrDefaultAsync(u => u.Username == username);
+        if (user == null || !Auth.VerifyPassword(_currentPw, user.PasswordHash))
+        {
+            _error = "Aktuelles Passwort ist falsch.";
+            _busy = false;
+            return;
+        }
+
+        user.PasswordHash = Auth.HashPassword(_newPw);
+        await Db.SaveChangesAsync();
+        _success = true;
+        _currentPw = _newPw = _confirmPw = "";
+        _busy = false;
+    }
+}

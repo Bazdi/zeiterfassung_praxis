@@ -406,8 +406,8 @@
                 Source = EntrySource.Terminal
             };
 
+            // StempelManager handles all saves internally (two-phase: insert→get ID→hash→update)
             var result = await StempelMgr.StempelAsync(request, TimeEntryRepo);
-            await Db.SaveChangesAsync();
 
             _lastAction = type switch
             {
