@@ -1,0 +1,245 @@
+@page "/admin/exporte"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject ZeiterfassungDbContext Db
+@inject SaldoService SaldoSvc
+
+<PageTitle>Exporte — Admin</PageTitle>
+
+<h1>Exporte</h1>
+<p class="lead">Monatsberichte für Steuerberater und Lohnabrechnung.</p>
+
+<div class="export-grid">
+    <div class="export-card">
+        <div class="export-icon pdf">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="16" y1="13" x2="8" y2="13"/>
+                <line x1="16" y1="17" x2="8" y2="17"/>
+                <polyline points="10 9 9 9 8 9"/>
+            </svg>
+        </div>
+        <div>
+            <div class="export-title">PDF Stundenzettel</div>
+            <div class="export-desc">Ein Dokument pro Mitarbeiter, unterschriftsfertig</div>
+        </div>
+    </div>
+
+    <div class="export-card">
+        <div class="export-icon excel">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                <polyline points="14 2 14 8 20 8"/>
+                <line x1="8" y1="13" x2="16" y2="13"/>
+                <line x1="8" y1="17" x2="16" y2="17"/>
+            </svg>
+        </div>
+        <div>
+            <div class="export-title">Excel Sammelbericht</div>
+            <div class="export-desc">Alle Mitarbeiter in einer Datei für den Steuerberater</div>
+        </div>
+    </div>
+</div>
+
+<div class="export-controls card mt-4">
+    <div class="card-body">
+        <div class="controls-row">
+            <div>
+                <label class="form-label">Monat</label>
+                <select class="form-select" @bind="_selectedMonth">
+                    @for (int m = 1; m <= 12; m++)
+                    {
+                        <option value="@m">@(new DateTime(2000, m, 1).ToString("MMMM"))</option>
+                    }
+                </select>
+            </div>
+            <div>
+                <label class="form-label">Jahr</label>
+                <select class="form-select" @bind="_selectedYear">
+                    @for (int y = DateTime.Now.Year; y >= DateTime.Now.Year - 3; y--)
+                    {
+                        <option value="@y">@y</option>
+                    }
+                </select>
+            </div>
+            <div class="controls-buttons">
+                <button class="btn btn-outline-secondary" @onclick="LoadPreview" disabled="@_loading">
+                    Vorschau laden
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="alert alert-info mt-3">
+        <span class="spinner-border spinner-border-sm me-2"></span>
+        Daten werden geladen…
+    </div>
+}
+
+@if (_preview.Count > 0)
+{
+    <div class="mt-4">
+        <div class="preview-header">
+            <h2>Vorschau — @(new DateTime(_selectedYear, _selectedMonth, 1).ToString("MMMM yyyy"))</h2>
+            <div style="display:flex;gap:0.75rem">
+                <button class="btn btn-outline-secondary" disabled title="PDF-Export folgt in Phase 2">
+                    ↓ PDF exportieren
+                </button>
+                <button class="btn btn-primary" @onclick="DownloadExcel" disabled title="Excel-Export folgt in Phase 2">
+                    ↓ Excel exportieren
+                </button>
+            </div>
+        </div>
+        <p class="text-muted" style="font-size:0.8rem;margin-bottom:1rem">
+            Export-Funktion wird in Phase 2 implementiert (QuestPDF + ClosedXML). Vorschau zeigt berechnete Werte.
+        </p>
+
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Mitarbeiter</th>
+                    <th>Soll (h)</th>
+                    <th>Ist (h)</th>
+                    <th>Saldo (h)</th>
+                    <th>Stempelungen</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var row in _preview)
+                {
+                    <tr>
+                        <td>@row.Name</td>
+                        <td style="font-variant-numeric:tabular-nums">@row.Required.ToString("F1")</td>
+                        <td style="font-variant-numeric:tabular-nums">@row.Worked.ToString("F1")</td>
+                        <td class="@(row.Balance >= 0 ? "text-success" : "text-danger")"
+                            style="font-weight:600;font-variant-numeric:tabular-nums">
+                            @(row.Balance >= 0 ? "+" : "")@row.Balance.ToString("F1")
+                        </td>
+                        <td style="color:#64748b">@row.EntryCount Einträge</td>
+                    </tr>
+                }
+            </tbody>
+            <tfoot>
+                <tr style="font-weight:600;border-top:2px solid rgba(255,255,255,0.15)">
+                    <td>Gesamt</td>
+                    <td style="font-variant-numeric:tabular-nums">@_preview.Sum(r => r.Required).ToString("F1")</td>
+                    <td style="font-variant-numeric:tabular-nums">@_preview.Sum(r => r.Worked).ToString("F1")</td>
+                    <td class="@(_preview.Sum(r => r.Balance) >= 0 ? "text-success" : "text-danger")"
+                        style="font-variant-numeric:tabular-nums">
+                        @(_preview.Sum(r => r.Balance) >= 0 ? "+" : "")@_preview.Sum(r => r.Balance).ToString("F1")
+                    </td>
+                    <td></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+}
+
+<style>
+    .export-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+    .export-card {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 1.25rem;
+        background: #1a1d27;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 12px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+
+    .export-icon {
+        width: 48px; height: 48px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    .export-icon.pdf { background: rgba(248,113,113,0.1); color: #f87171; }
+    .export-icon.excel { background: rgba(74,222,128,0.1); color: #4ade80; }
+
+    .export-title { font-weight: 600; color: #e2e8f0; font-size: 0.9rem; }
+    .export-desc { font-size: 0.8rem; color: #64748b; margin-top: 0.2rem; }
+
+    .controls-row {
+        display: flex;
+        gap: 1rem;
+        align-items: flex-end;
+        flex-wrap: wrap;
+    }
+    .controls-row > div { min-width: 140px; }
+    .controls-buttons { display: flex; gap: 0.5rem; align-items: flex-end; }
+
+    .preview-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+    }
+    .preview-header h2 { margin: 0; }
+</style>
+
+@code {
+    private int _selectedMonth = DateTime.Now.Month;
+    private int _selectedYear = DateTime.Now.Year;
+    private bool _loading = false;
+    private List<PreviewRow> _preview = new();
+
+    private async Task LoadPreview()
+    {
+        _loading = true;
+        _preview = new();
+        StateHasChanged();
+
+        var employees = await Db.Employees.Where(e => e.IsActive).OrderBy(e => e.LastName).ToListAsync();
+        var monthStart = new DateTime(_selectedYear, _selectedMonth, 1, 0, 0, 0, DateTimeKind.Utc);
+        var monthEnd = monthStart.AddMonths(1);
+
+        foreach (var emp in employees)
+        {
+            var entries = await Db.TimeEntries
+                .Where(e => e.EmployeeId == emp.Id && e.TimestampUtc >= monthStart && e.TimestampUtc < monthEnd)
+                .ToListAsync();
+
+            var patterns = await Db.WorkingTimePatterns
+                .Where(p => p.EmployeeId == emp.Id)
+                .ToListAsync();
+
+            var holidays = await Db.Holidays
+                .Where(h => h.Date >= monthStart && h.Date < monthEnd)
+                .ToListAsync();
+
+            var balance = SaldoSvc.CalculateMonthlyBalance(_selectedYear, _selectedMonth, entries, patterns, holidays);
+            var workedH = SaldoSvc.CalculateWorkedHours(entries);
+            var requiredH = workedH - balance;
+
+            _preview.Add(new PreviewRow
+            {
+                Name = $"{emp.LastName}, {emp.FirstName}",
+                Required = requiredH,
+                Worked = workedH,
+                Balance = balance,
+                EntryCount = entries.Count
+            });
+        }
+
+        _loading = false;
+    }
+
+    private Task DownloadExcel() => Task.CompletedTask; // Phase 2
+
+    private class PreviewRow
+    {
+        public string Name { get; set; } = "";
+        public decimal Required { get; set; }
+        public decimal Worked { get; set; }
+        public decimal Balance { get; set; }
+        public int EntryCount { get; set; }
+    }
+}

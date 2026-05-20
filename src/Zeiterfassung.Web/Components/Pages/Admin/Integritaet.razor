@@ -1,4 +1,5 @@
 @page "/admin/integritaet"
+@attribute [Authorize(Roles = "Admin")]
 @rendermode InteractiveServer
 @inject ZeiterfassungDbContext Db
 @inject HashChainService HashChain

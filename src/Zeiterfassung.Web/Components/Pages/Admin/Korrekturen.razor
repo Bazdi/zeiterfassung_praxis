@@ -1,0 +1,249 @@
+@page "/admin/korrekturen"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject ZeiterfassungDbContext Db
+@inject StempelManager StempelMgr
+@inject ITimeEntryRepository TimeEntryRepo
+@inject AuthenticationStateProvider AuthState
+
+<PageTitle>Korrekturanträge — Admin</PageTitle>
+
+<h1>Korrekturanträge</h1>
+
+@if (_pending.Count == 0 && _recent.Count == 0)
+{
+    <div class="empty-state">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:#64748b">
+            <path d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z"/>
+        </svg>
+        <p>Keine offenen Korrekturanträge.</p>
+    </div>
+}
+
+@if (_pending.Count > 0)
+{
+    <h2>Offen (@_pending.Count)</h2>
+    <div class="request-list">
+        @foreach (var req in _pending)
+        {
+            <div class="request-card">
+                <div class="request-header">
+                    <span class="emp-name">@req.Employee?.LastName, @req.Employee?.FirstName</span>
+                    <span class="request-date">@req.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                </div>
+                <div class="request-body">
+                    <div class="request-detail">
+                        <span class="detail-label">Gewünschte Stempelung</span>
+                        <span class="detail-value type-badge type-@req.Type.ToString().ToLower()">@GetTypeLabel(req.Type)</span>
+                    </div>
+                    <div class="request-detail">
+                        <span class="detail-label">Zeitpunkt</span>
+                        <span class="detail-value" style="font-variant-numeric:tabular-nums">
+                            @req.RequestedTimestamp.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                        </span>
+                    </div>
+                    <div class="request-detail">
+                        <span class="detail-label">Begründung</span>
+                        <span class="detail-value reason">@req.Reason</span>
+                    </div>
+                </div>
+                @if (_errorMap.ContainsKey(req.Id))
+                {
+                    <div class="req-error">@_errorMap[req.Id]</div>
+                }
+                <div class="request-actions">
+                    <button class="btn-approve" @onclick="() => Approve(req)" disabled="@_busy">
+                        ✓ Genehmigen
+                    </button>
+                    <button class="btn-reject" @onclick="() => Reject(req)" disabled="@_busy">
+                        ✕ Ablehnen
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (_recent.Count > 0)
+{
+    <h2 style="margin-top:2rem">Zuletzt bearbeitet</h2>
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th>Mitarbeiter</th>
+                <th>Typ</th>
+                <th>Zeitpunkt</th>
+                <th>Status</th>
+                <th>Bearbeitet am</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var req in _recent)
+            {
+                <tr>
+                    <td>@req.Employee?.LastName, @req.Employee?.FirstName</td>
+                    <td>@GetTypeLabel(req.Type)</td>
+                    <td style="font-variant-numeric:tabular-nums">@req.RequestedTimestamp.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                    <td>
+                        @if (req.Status == CorrectionStatus.Approved)
+                        {
+                            <span class="badge bg-success">Genehmigt</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-danger">Abgelehnt</span>
+                        }
+                    </td>
+                    <td style="font-variant-numeric:tabular-nums">@req.ApprovedAt?.ToLocalTime().ToString("dd.MM. HH:mm")</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+<style>
+    .empty-state { text-align: center; padding: 4rem 2rem; color: #64748b; }
+    .empty-state p { margin-top: 1rem; }
+
+    .request-list { display: flex; flex-direction: column; gap: 1rem; }
+
+    .request-card {
+        background: #1a1d27;
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 12px;
+        padding: 1.25rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+
+    .request-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+
+    .emp-name { font-weight: 600; font-size: 0.95rem; color: #e2e8f0; }
+    .request-date { font-size: 0.78rem; color: #64748b; font-variant-numeric: tabular-nums; }
+
+    .request-body { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem; }
+    .request-detail:last-child { grid-column: 1 / -1; }
+
+    .detail-label { display: block; font-size: 0.72rem; color: #64748b; margin-bottom: 0.2rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .detail-value { font-size: 0.88rem; color: #e2e8f0; }
+    .reason { font-style: italic; color: #94a3b8; }
+
+    .type-badge {
+        display: inline-block;
+        padding: 0.15rem 0.6rem;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+    .type-kommen { background: rgba(74,222,128,0.15); color: #4ade80; }
+    .type-gehen { background: rgba(248,113,113,0.15); color: #f87171; }
+    .type-pausestart { background: rgba(251,191,36,0.15); color: #fbbf24; }
+    .type-pauseend { background: rgba(23,162,184,0.15); color: #67e8f9; }
+
+    .req-error {
+        background: rgba(248,113,113,0.1);
+        border: 1px solid rgba(248,113,113,0.3);
+        border-radius: 8px;
+        padding: 0.5rem 0.75rem;
+        color: #fca5a5;
+        font-size: 0.82rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .request-actions { display: flex; gap: 0.75rem; }
+
+    .btn-approve, .btn-reject {
+        flex: 1;
+        padding: 0.6rem 1rem;
+        border: none;
+        border-radius: 8px;
+        font-size: 0.875rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity 0.12s ease, transform 0.1s ease;
+        min-height: 40px;
+    }
+    .btn-approve { background: rgba(74,222,128,0.15); color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
+    .btn-approve:hover { background: rgba(74,222,128,0.25); }
+    .btn-reject { background: rgba(248,113,113,0.1); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
+    .btn-reject:hover { background: rgba(248,113,113,0.2); }
+    .btn-approve:active, .btn-reject:active { transform: scale(0.96); }
+    .btn-approve:disabled, .btn-reject:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
+
+@code {
+    private List<CorrectionRequest> _pending = new();
+    private List<CorrectionRequest> _recent = new();
+    private Dictionary<int, string> _errorMap = new();
+    private bool _busy = false;
+    private int _adminUserId = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (int.TryParse(authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var uid))
+            _adminUserId = uid;
+
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _pending = await Db.CorrectionRequests
+            .Include(r => r.Employee)
+            .Where(r => r.Status == CorrectionStatus.Open)
+            .OrderByDescending(r => r.CreatedAt)
+            .ToListAsync();
+
+        _recent = await Db.CorrectionRequests
+            .Include(r => r.Employee)
+            .Where(r => r.Status != CorrectionStatus.Open)
+            .OrderByDescending(r => r.ApprovedAt)
+            .Take(20)
+            .ToListAsync();
+    }
+
+    private async Task Approve(CorrectionRequest req)
+    {
+        _busy = true;
+        _errorMap.Remove(req.Id);
+        try
+        {
+            var entry = await StempelMgr.ApplyCorrectionAsync(req, _adminUserId, TimeEntryRepo);
+            await Db.SaveChangesAsync();
+            await LoadAsync();
+        }
+        catch (StempelException ex)
+        {
+            _errorMap[req.Id] = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task Reject(CorrectionRequest req)
+    {
+        _busy = true;
+        req.Status = CorrectionStatus.Rejected;
+        req.ApprovedByUserId = _adminUserId;
+        req.ApprovedAt = DateTime.UtcNow;
+        await Db.SaveChangesAsync();
+        await LoadAsync();
+        _busy = false;
+    }
+
+    private string GetTypeLabel(TimeEntryType t) => t switch
+    {
+        TimeEntryType.Kommen => "Kommen",
+        TimeEntryType.Gehen => "Gehen",
+        TimeEntryType.PauseStart => "Pause Start",
+        TimeEntryType.PauseEnd => "Pause Ende",
+        _ => t.ToString()
+    };
+}

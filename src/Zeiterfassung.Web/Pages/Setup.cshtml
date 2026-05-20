@@ -1,0 +1,145 @@
+@page
+@model Zeiterfassung.Web.Pages.SetupModel
+@{
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ersteinrichtung — Zeiterfassung</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; }
+        html, body {
+            margin: 0; height: 100%;
+            background: #0f1117;
+            color: #e2e8f0;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+        .page {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+        .card {
+            width: 100%;
+            max-width: 460px;
+            background: #1a1d27;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 16px;
+            padding: 2.5rem;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        }
+        .badge-new {
+            display: inline-block;
+            background: rgba(79,142,247,0.15);
+            color: #6aa3ff;
+            border: 1px solid rgba(79,142,247,0.3);
+            border-radius: 20px;
+            padding: 0.2rem 0.75rem;
+            font-size: 0.72rem;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            margin-bottom: 1rem;
+        }
+        h1 { font-size: 1.4rem; font-weight: 600; margin: 0 0 0.25rem; color: #e2e8f0; }
+        .subtitle { font-size: 0.85rem; color: #64748b; margin: 0 0 2rem; }
+        label { display: block; font-size: 0.8rem; color: #94a3b8; margin-bottom: 0.35rem; }
+        .hint { font-size: 0.75rem; color: #64748b; margin-top: -0.7rem; margin-bottom: 1rem; }
+        input {
+            width: 100%;
+            padding: 0.7rem 0.875rem;
+            background: #22263a;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px;
+            color: #e2e8f0;
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+            outline: none;
+            transition: border-color 0.15s ease;
+        }
+        input:focus { border-color: #4f8ef7; box-shadow: 0 0 0 3px rgba(79,142,247,0.2); }
+        .error {
+            background: rgba(248,113,113,0.1);
+            border: 1px solid rgba(248,113,113,0.3);
+            border-radius: 8px;
+            padding: 0.75rem 1rem;
+            color: #fca5a5;
+            font-size: 0.85rem;
+            margin-bottom: 1rem;
+        }
+        button {
+            width: 100%;
+            padding: 0.8rem;
+            background: #4f8ef7;
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.12s ease, transform 0.1s ease;
+            margin-top: 0.5rem;
+        }
+        button:hover { background: #6aa3ff; }
+        button:active { transform: scale(0.96); }
+        .info {
+            background: rgba(79,142,247,0.08);
+            border: 1px solid rgba(79,142,247,0.2);
+            border-radius: 10px;
+            padding: 0.875rem 1rem;
+            font-size: 0.82rem;
+            color: #93c5fd;
+            margin-bottom: 1.5rem;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+<div class="page">
+    <div class="card">
+        <div class="badge-new">Ersteinrichtung</div>
+        <h1>Admin-Konto anlegen</h1>
+        <p class="subtitle">Wird nur einmalig aufgerufen. Danach ist der Zugang gesperrt.</p>
+
+        <div class="info">
+            Dieses Konto gehört dem Praxisinhaber / der Praxisinhaberin. Nach der Einrichtung
+            können Mitarbeiter und Arbeitszeiten verwaltet werden.
+        </div>
+
+        @if (!string.IsNullOrEmpty(Model.ErrorMessage))
+        {
+            <div class="error">@Model.ErrorMessage</div>
+        }
+
+        <form method="post">
+            @Html.AntiForgeryToken()
+
+            <label for="username">Benutzername</label>
+            <input id="username" name="Username" type="text" autocomplete="username"
+                   value="@Model.Username" placeholder="z.B. kurdy" autofocus required />
+            <p class="hint">Kleinbuchstaben, kein Leerzeichen.</p>
+
+            <label for="displayName">Anzeigename (optional)</label>
+            <input id="displayName" name="DisplayName" type="text"
+                   value="@Model.DisplayName" placeholder="z.B. Dr. Kurdy" />
+            <p class="hint">Erscheint im Admin-Bereich.</p>
+
+            <label for="password">Passwort</label>
+            <input id="password" name="Password" type="password" autocomplete="new-password"
+                   placeholder="Mind. 10 Zeichen, 1 Großbuchstabe, 1 Zahl" required />
+
+            <label for="confirm">Passwort bestätigen</label>
+            <input id="confirm" name="Confirm" type="password" autocomplete="new-password" required />
+
+            <button type="submit">Konto erstellen &amp; einloggen</button>
+        </form>
+    </div>
+</div>
+</body>
+</html>
