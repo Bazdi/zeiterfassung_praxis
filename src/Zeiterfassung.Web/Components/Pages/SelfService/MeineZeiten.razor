@@ -1,0 +1,237 @@
+@page "/selfservice"
+@page "/selfservice/meinezeiten"
+@rendermode InteractiveServer
+@inject ZeiterfassungDbContext Db
+@inject SaldoService SaldoSvc
+
+<PageTitle>Meine Zeiten — Zeiterfassung</PageTitle>
+
+<h1>Meine Zeiten</h1>
+
+@if (_employee == null)
+{
+    <div class="mb-3">
+        <label class="form-label">Mitarbeiter auswählen:</label>
+        <select class="form-select w-auto d-inline-block ms-2" @onchange="EmployeeSelected">
+            <option value="">— bitte wählen —</option>
+            @foreach (var emp in _employees)
+            {
+                <option value="@emp.Id">@emp.LastName, @emp.FirstName</option>
+            }
+        </select>
+    </div>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h4>@_employee.LastName, @_employee.FirstName</h4>
+        <div>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => PrevMonth()">◀</button>
+            <span class="mx-2">@_viewDate.ToString("MMMM yyyy")</span>
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => NextMonth()">▶</button>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card text-center @(_monthlySaldo >= 0 ? "border-success" : "border-danger")">
+                <div class="card-body">
+                    <h6 class="card-subtitle text-muted">Überstunden-Saldo</h6>
+                    <div class="fs-3 fw-bold @(_monthlySaldo >= 0 ? "text-success" : "text-danger")">
+                        @(_monthlySaldo >= 0 ? "+" : "")@_monthlySaldo.ToString("F1")h
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card text-center">
+                <div class="card-body">
+                    <h6 class="card-subtitle text-muted">Gesamtarbeitszeit</h6>
+                    <div class="fs-3 fw-bold">@_totalWorkedHours.ToString("F1")h</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <table class="table table-sm table-hover">
+        <thead>
+            <tr>
+                <th>Datum</th>
+                <th>Kommen</th>
+                <th>Gehen</th>
+                <th>Pause</th>
+                <th>Arbeitszeit</th>
+                <th>Soll</th>
+                <th>Differenz</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var day in _dailySummaries)
+            {
+                <tr class="@(day.IsToday ? "table-active" : "")">
+                    <td>
+                        @day.Date.ToString("ddd dd.MM")
+                        @if (day.HasWarning) { <span class="badge bg-warning text-dark ms-1">⚠</span> }
+                    </td>
+                    <td>@(day.KommenTime?.ToString("HH:mm") ?? "—")</td>
+                    <td>@(day.GehenTime?.ToString("HH:mm") ?? "—")</td>
+                    <td>@(day.PauseMinutes > 0 ? $"{day.PauseMinutes}min" : "—")</td>
+                    <td>@(day.WorkedHours > 0 ? $"{day.WorkedHours:F1}h" : "—")</td>
+                    <td>@(day.RequiredHours > 0 ? $"{day.RequiredHours:F1}h" : "—")</td>
+                    <td class="@(day.Diff >= 0 ? "text-success" : "text-danger")">
+                        @(day.Diff != 0 ? $"{(day.Diff >= 0 ? "+" : "")}{day.Diff:F1}h" : "—")
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<Employee> _employees = new();
+    private Employee? _employee;
+    private DateTime _viewDate = new(DateTime.Now.Year, DateTime.Now.Month, 1);
+    private decimal _monthlySaldo = 0;
+    private decimal _totalWorkedHours = 0;
+    private List<DaySummary> _dailySummaries = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await Db.Employees
+            .Where(e => e.IsActive)
+            .OrderBy(e => e.LastName)
+            .ToListAsync();
+    }
+
+    private async Task EmployeeSelected(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var empId))
+        {
+            _employee = null;
+            return;
+        }
+        _employee = _employees.FirstOrDefault(x => x.Id == empId);
+        await LoadData();
+    }
+
+    private async Task PrevMonth()
+    {
+        _viewDate = _viewDate.AddMonths(-1);
+        await LoadData();
+    }
+
+    private async Task NextMonth()
+    {
+        _viewDate = _viewDate.AddMonths(1);
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        if (_employee == null) return;
+
+        var monthStart = new DateTime(_viewDate.Year, _viewDate.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var monthEnd = monthStart.AddMonths(1);
+
+        var entries = await Db.TimeEntries
+            .Where(e => e.EmployeeId == _employee.Id
+                && e.TimestampUtc >= monthStart
+                && e.TimestampUtc < monthEnd)
+            .OrderBy(e => e.TimestampUtc)
+            .ToListAsync();
+
+        var patterns = await Db.WorkingTimePatterns
+            .Where(p => p.EmployeeId == _employee.Id)
+            .ToListAsync();
+
+        var holidays = await Db.Holidays
+            .Where(h => h.Date >= monthStart && h.Date < monthEnd)
+            .ToListAsync();
+
+        _dailySummaries = new();
+        _totalWorkedHours = 0;
+
+        int daysInMonth = DateTime.DaysInMonth(_viewDate.Year, _viewDate.Month);
+        for (int day = 1; day <= daysInMonth; day++)
+        {
+            var dateUtc = new DateTime(_viewDate.Year, _viewDate.Month, day, 0, 0, 0, DateTimeKind.Utc);
+            var nextDay = dateUtc.AddDays(1);
+            var dayEntries = entries
+                .Where(e => e.TimestampUtc >= dateUtc && e.TimestampUtc < nextDay)
+                .OrderBy(e => e.TimestampUtc)
+                .ToList();
+
+            var kommen = dayEntries.FirstOrDefault(e => e.Type == TimeEntryType.Kommen)?.TimestampUtc.ToLocalTime();
+            var gehen = dayEntries.LastOrDefault(e => e.Type == TimeEntryType.Gehen)?.TimestampUtc.ToLocalTime();
+
+            decimal pauseMinutes = 0;
+            TimeEntry? pauseStart = null;
+            foreach (var e in dayEntries)
+            {
+                if (e.Type == TimeEntryType.PauseStart) pauseStart = e;
+                else if (e.Type == TimeEntryType.PauseEnd && pauseStart != null)
+                {
+                    pauseMinutes += (decimal)(e.TimestampUtc - pauseStart.TimestampUtc).TotalMinutes;
+                    pauseStart = null;
+                }
+            }
+
+            decimal worked = 0;
+            if (kommen.HasValue && gehen.HasValue)
+            {
+                worked = (decimal)(gehen.Value - kommen.Value).TotalHours - pauseMinutes / 60m;
+                worked = Math.Max(0, worked);
+            }
+
+            var pattern = patterns
+                .Where(p => p.ValidFrom.Date <= dateUtc.Date &&
+                    (!p.ValidUntil.HasValue || p.ValidUntil.Value.Date >= dateUtc.Date))
+                .OrderByDescending(p => p.ValidFrom)
+                .FirstOrDefault();
+
+            decimal required = 0;
+            if (pattern != null && dateUtc.DayOfWeek is not DayOfWeek.Saturday and not DayOfWeek.Sunday)
+            {
+                required = dateUtc.DayOfWeek switch
+                {
+                    DayOfWeek.Monday => pattern.MondayHours,
+                    DayOfWeek.Tuesday => pattern.TuesdayHours,
+                    DayOfWeek.Wednesday => pattern.WednesdayHours,
+                    DayOfWeek.Thursday => pattern.ThursdayHours,
+                    DayOfWeek.Friday => pattern.FridayHours,
+                    _ => 0
+                };
+            }
+
+            _totalWorkedHours += worked;
+
+            _dailySummaries.Add(new DaySummary
+            {
+                Date = dateUtc.ToLocalTime(),
+                KommenTime = kommen,
+                GehenTime = gehen,
+                PauseMinutes = (int)pauseMinutes,
+                WorkedHours = worked,
+                RequiredHours = required,
+                Diff = worked - required,
+                IsToday = dateUtc.Date == DateTime.UtcNow.Date,
+                HasWarning = worked > 10 || (worked > 6 && pauseMinutes < 30)
+            });
+        }
+
+        _monthlySaldo = _dailySummaries.Sum(d => d.Diff);
+    }
+
+    private class DaySummary
+    {
+        public DateTime Date { get; set; }
+        public DateTime? KommenTime { get; set; }
+        public DateTime? GehenTime { get; set; }
+        public int PauseMinutes { get; set; }
+        public decimal WorkedHours { get; set; }
+        public decimal RequiredHours { get; set; }
+        public decimal Diff { get; set; }
+        public bool IsToday { get; set; }
+        public bool HasWarning { get; set; }
+    }
+}

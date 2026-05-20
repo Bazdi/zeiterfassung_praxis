@@ -6,18 +6,21 @@ namespace Zeiterfassung.Core.Services;
 
 public class HashChainService
 {
-    private readonly SemaphoreSlim _semaphore = new(1, 1);
+    private static readonly SemaphoreSlim _timeEntrySemaphore = new(1, 1);
+    private static readonly SemaphoreSlim _auditLogSemaphore = new(1, 1);
 
-    public async Task<string> ComputeHashAsync(string prevHash, string payload)
+    public static readonly string GenesisHash =
+        new string('0', 64);
+
+    public string ComputeHash(string prevHash, string payload)
     {
         var combined = prevHash + "\n" + payload;
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(combined));
         return BitConverter.ToString(bytes).Replace("-", "").ToLowerInvariant();
     }
 
-    public string CreatePayload(TimeEntry entry)
-    {
-        var parts = new[]
+    public string CreatePayload(TimeEntry entry) =>
+        string.Join("|", new[]
         {
             entry.Id.ToString(),
             entry.EmployeeId.ToString(),
@@ -27,13 +30,10 @@ public class HashChainService
             entry.CorrectionOfId?.ToString() ?? "",
             entry.CreatedByUserId?.ToString() ?? "",
             entry.CreatedAtUtc.ToUniversalTime().ToString("O")
-        };
-        return string.Join("|", parts);
-    }
+        });
 
-    public string CreatePayload(AuditLog entry)
-    {
-        var parts = new[]
+    public string CreatePayload(AuditLog entry) =>
+        string.Join("|", new[]
         {
             entry.Id.ToString(),
             entry.UserId?.ToString() ?? "",
@@ -43,33 +43,50 @@ public class HashChainService
             entry.OldJson ?? "",
             entry.NewJson ?? "",
             entry.TimestampUtc.ToUniversalTime().ToString("O")
-        };
-        return string.Join("|", parts);
-    }
+        });
 
-    public async Task<(string PrevHash, string Hash)> GetLastHashAsync(
-        IEnumerable<TimeEntry> entries)
+    /// <summary>
+    /// Appends a TimeEntry to the hash chain under a semaphore.
+    /// Caller must pass in the current last hash from the DB (within a transaction).
+    /// </summary>
+    public async Task<(string PrevHash, string Hash)> ComputeAndChainAsync(
+        TimeEntry entry,
+        string prevHash)
     {
-        var lastEntry = entries.OrderByDescending(e => e.Id).FirstOrDefault();
-        if (lastEntry == null)
+        await _timeEntrySemaphore.WaitAsync();
+        try
         {
-            return ("0000000000000000000000000000000000000000000000000000000000000000", "0000000000000000000000000000000000000000000000000000000000000000");
+            var payload = CreatePayload(entry);
+            var hash = ComputeHash(prevHash, payload);
+            return (prevHash, hash);
         }
-        return (lastEntry.Hash, lastEntry.Hash);
+        finally
+        {
+            _timeEntrySemaphore.Release();
+        }
     }
 
-    public async Task<(string PrevHash, string Hash)> GetLastHashAsync(
-        IEnumerable<AuditLog> entries)
+    /// <summary>
+    /// Appends an AuditLog entry to the audit hash chain under a semaphore.
+    /// </summary>
+    public async Task<(string PrevHash, string Hash)> ComputeAndChainAuditAsync(
+        AuditLog entry,
+        string prevHash)
     {
-        var lastEntry = entries.OrderByDescending(e => e.Id).FirstOrDefault();
-        if (lastEntry == null)
+        await _auditLogSemaphore.WaitAsync();
+        try
         {
-            return ("0000000000000000000000000000000000000000000000000000000000000000", "0000000000000000000000000000000000000000000000000000000000000000");
+            var payload = CreatePayload(entry);
+            var hash = ComputeHash(prevHash, payload);
+            return (prevHash, hash);
         }
-        return (lastEntry.Hash, lastEntry.Hash);
+        finally
+        {
+            _auditLogSemaphore.Release();
+        }
     }
 
-    public async Task<HashChainVerificationResult> VerifyChainAsync(
+    public async Task<HashChainVerificationResult> VerifyTimeEntryChainAsync(
         IList<TimeEntry> entries,
         long? fromId = null,
         long? toId = null)
@@ -80,47 +97,15 @@ public class HashChainService
             .OrderBy(e => e.Id)
             .ToList();
 
-        if (orderedEntries.Count == 0)
-        {
-            return new HashChainVerificationResult { IsValid = true };
-        }
-
-        string prevHash = "0000000000000000000000000000000000000000000000000000000000000000";
-
-        foreach (var entry in orderedEntries)
-        {
-            if (entry.PrevHash != prevHash)
-            {
-                return new HashChainVerificationResult
-                {
-                    IsValid = false,
-                    FailedEntryId = entry.Id,
-                    ExpectedHash = prevHash,
-                    ActualHash = entry.PrevHash
-                };
-            }
-
-            var payload = CreatePayload(entry);
-            var computedHash = await ComputeHashAsync(entry.PrevHash, payload);
-
-            if (computedHash != entry.Hash)
-            {
-                return new HashChainVerificationResult
-                {
-                    IsValid = false,
-                    FailedEntryId = entry.Id,
-                    ExpectedHash = computedHash,
-                    ActualHash = entry.Hash
-                };
-            }
-
-            prevHash = entry.Hash;
-        }
-
-        return new HashChainVerificationResult { IsValid = true };
+        return await VerifyChainInternalAsync(
+            orderedEntries,
+            e => e.Id,
+            e => e.PrevHash,
+            e => e.Hash,
+            e => CreatePayload(e));
     }
 
-    public async Task<HashChainVerificationResult> VerifyChainAsync(
+    public async Task<HashChainVerificationResult> VerifyAuditLogChainAsync(
         IList<AuditLog> entries,
         long? fromId = null,
         long? toId = null)
@@ -131,44 +116,54 @@ public class HashChainService
             .OrderBy(e => e.Id)
             .ToList();
 
-        if (orderedEntries.Count == 0)
-        {
-            return new HashChainVerificationResult { IsValid = true };
-        }
+        return await VerifyChainInternalAsync(
+            orderedEntries,
+            e => e.Id,
+            e => e.PrevHash,
+            e => e.Hash,
+            e => CreatePayload(e));
+    }
 
-        string prevHash = "0000000000000000000000000000000000000000000000000000000000000000";
+    private Task<HashChainVerificationResult> VerifyChainInternalAsync<T>(
+        IList<T> entries,
+        Func<T, long> getId,
+        Func<T, string> getPrevHash,
+        Func<T, string> getHash,
+        Func<T, string> createPayload)
+    {
+        if (entries.Count == 0)
+            return Task.FromResult(new HashChainVerificationResult { IsValid = true });
 
-        foreach (var entry in orderedEntries)
+        var prevHash = GenesisHash;
+        foreach (var entry in entries)
         {
-            if (entry.PrevHash != prevHash)
+            if (getPrevHash(entry) != prevHash)
             {
-                return new HashChainVerificationResult
+                return Task.FromResult(new HashChainVerificationResult
                 {
                     IsValid = false,
-                    FailedEntryId = entry.Id,
-                    ExpectedHash = prevHash,
-                    ActualHash = entry.PrevHash
-                };
+                    FailedEntryId = getId(entry),
+                    ExpectedPrevHash = prevHash,
+                    ActualPrevHash = getPrevHash(entry)
+                });
             }
 
-            var payload = CreatePayload(entry);
-            var computedHash = await ComputeHashAsync(entry.PrevHash, payload);
-
-            if (computedHash != entry.Hash)
+            var computedHash = ComputeHash(getPrevHash(entry), createPayload(entry));
+            if (computedHash != getHash(entry))
             {
-                return new HashChainVerificationResult
+                return Task.FromResult(new HashChainVerificationResult
                 {
                     IsValid = false,
-                    FailedEntryId = entry.Id,
+                    FailedEntryId = getId(entry),
                     ExpectedHash = computedHash,
-                    ActualHash = entry.Hash
-                };
+                    ActualHash = getHash(entry)
+                });
             }
 
-            prevHash = entry.Hash;
+            prevHash = getHash(entry);
         }
 
-        return new HashChainVerificationResult { IsValid = true };
+        return Task.FromResult(new HashChainVerificationResult { IsValid = true });
     }
 }
 
@@ -176,6 +171,8 @@ public class HashChainVerificationResult
 {
     public bool IsValid { get; set; }
     public long? FailedEntryId { get; set; }
+    public string? ExpectedPrevHash { get; set; }
+    public string? ActualPrevHash { get; set; }
     public string? ExpectedHash { get; set; }
     public string? ActualHash { get; set; }
 }

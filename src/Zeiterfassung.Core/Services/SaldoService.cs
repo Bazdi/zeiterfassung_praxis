@@ -7,49 +7,83 @@ public class SaldoService
 {
     private static readonly DateTimeZone BerlinTz = DateTimeZoneProviders.Tzdb["Europe/Berlin"];
 
-    public decimal GetSaldoAsync(
-        DateTime date,
+    /// <summary>
+    /// Calculates worked hours minus required hours for the given month.
+    /// Uses NodaTime for DST-safe day boundaries (handles 23h/25h days in March/October).
+    /// </summary>
+    public decimal CalculateMonthlyBalance(
+        int year,
+        int month,
         IList<TimeEntry> employeeEntries,
         IList<WorkingTimePattern> workingPatterns,
         IList<Holiday> holidays)
     {
-        var localDate = LocalDate.FromDateTime(date);
-        var totalWorkedHours = 0m;
-        var totalRequiredHours = 0m;
+        var totalWorkedMinutes = 0m;
+        var totalRequiredMinutes = 0m;
 
-        var startOfMonth = new LocalDate(date.Year, date.Month, 1);
-        var endOfMonth = startOfMonth.PlusDays(DateTime.DaysInMonth(date.Year, date.Month) - 1);
+        var startOfMonth = new LocalDate(year, month, 1);
+        var daysInMonth = DateTime.DaysInMonth(year, month);
 
-        for (var d = startOfMonth; d <= endOfMonth; d = d.PlusDays(1))
+        for (var dayOffset = 0; dayOffset < daysInMonth; dayOffset++)
         {
-            var dateTime = d.AtStartOfDayInZone(BerlinTz).ToDateTimeUtc();
+            var localDate = startOfMonth.PlusDays(dayOffset);
+
+            // DST-safe: get UTC interval for this local calendar day in Berlin timezone
+            var startOfDayBerlin = localDate.AtStartOfDayInZone(BerlinTz);
+            var endOfDayBerlin = localDate.PlusDays(1).AtStartOfDayInZone(BerlinTz);
+
+            var startUtc = startOfDayBerlin.ToDateTimeUtc();
+            var endUtc = endOfDayBerlin.ToDateTimeUtc();
+
             var dayEntries = employeeEntries
-                .Where(e => e.TimestampUtc.Date == dateTime.Date)
+                .Where(e => e.TimestampUtc >= startUtc && e.TimestampUtc < endUtc)
                 .OrderBy(e => e.TimestampUtc)
                 .ToList();
 
-            var requiredHours = GetRequiredHoursForDay(d, workingPatterns, holidays);
-            totalRequiredHours += requiredHours;
+            var requiredMinutes = GetRequiredMinutesForDay(localDate, workingPatterns, holidays);
+            totalRequiredMinutes += requiredMinutes;
 
             if (dayEntries.Count == 0)
                 continue;
 
-            var kommenEntry = dayEntries.FirstOrDefault(e => e.Type == TimeEntryType.Kommen);
-            var gehenEntry = dayEntries.LastOrDefault(e => e.Type == TimeEntryType.Gehen);
-
-            if (kommenEntry != null && gehenEntry != null)
-            {
-                var workDuration = gehenEntry.TimestampUtc - kommenEntry.TimestampUtc;
-                var pauseDuration = CalculatePauseDuration(dayEntries);
-                var workedHours = (decimal)(workDuration.TotalMinutes - pauseDuration) / 60;
-                totalWorkedHours += workedHours;
-            }
+            var workedMinutes = CalculateWorkedMinutes(dayEntries);
+            totalWorkedMinutes += workedMinutes;
         }
 
-        return totalWorkedHours - totalRequiredHours;
+        return (totalWorkedMinutes - totalRequiredMinutes) / 60m;
     }
 
-    private decimal GetRequiredHoursForDay(
+    public decimal CalculateDailyBalance(
+        LocalDate date,
+        IList<TimeEntry> dayEntries,
+        IList<WorkingTimePattern> workingPatterns,
+        IList<Holiday> holidays)
+    {
+        var required = GetRequiredMinutesForDay(date, workingPatterns, holidays);
+        var worked = CalculateWorkedMinutes(dayEntries.OrderBy(e => e.TimestampUtc).ToList());
+        return (worked - required) / 60m;
+    }
+
+    public decimal CalculateWorkedHours(IList<TimeEntry> dayEntries)
+    {
+        return CalculateWorkedMinutes(dayEntries.OrderBy(e => e.TimestampUtc).ToList()) / 60m;
+    }
+
+    private decimal CalculateWorkedMinutes(IList<TimeEntry> sortedDayEntries)
+    {
+        var kommenEntry = sortedDayEntries.FirstOrDefault(e => e.Type == TimeEntryType.Kommen);
+        var gehenEntry = sortedDayEntries.LastOrDefault(e => e.Type == TimeEntryType.Gehen);
+
+        if (kommenEntry == null || gehenEntry == null)
+            return 0;
+
+        var totalMinutes = (decimal)(gehenEntry.TimestampUtc - kommenEntry.TimestampUtc).TotalMinutes;
+        var pauseMinutes = CalculatePauseMinutes(sortedDayEntries);
+
+        return Math.Max(0, totalMinutes - pauseMinutes);
+    }
+
+    private decimal GetRequiredMinutesForDay(
         LocalDate date,
         IList<WorkingTimePattern> patterns,
         IList<Holiday> holidays)
@@ -60,16 +94,17 @@ public class SaldoService
         if (date.DayOfWeek == IsoDayOfWeek.Saturday || date.DayOfWeek == IsoDayOfWeek.Sunday)
             return 0;
 
-        var dateTime = date.AtStartOfDayInZone(BerlinTz).ToDateTimeUtc();
+        var dateUtc = date.AtStartOfDayInZone(BerlinTz).ToDateTimeUtc();
         var pattern = patterns
-            .Where(p => p.ValidFrom <= dateTime && (!p.ValidUntil.HasValue || p.ValidUntil >= dateTime))
+            .Where(p => p.ValidFrom.Date <= dateUtc.Date &&
+                        (!p.ValidUntil.HasValue || p.ValidUntil.Value.Date >= dateUtc.Date))
             .OrderByDescending(p => p.ValidFrom)
             .FirstOrDefault();
 
         if (pattern == null)
             return 0;
 
-        return date.DayOfWeek switch
+        var dailyHours = date.DayOfWeek switch
         {
             IsoDayOfWeek.Monday => pattern.MondayHours,
             IsoDayOfWeek.Tuesday => pattern.TuesdayHours,
@@ -80,17 +115,19 @@ public class SaldoService
             IsoDayOfWeek.Sunday => pattern.SundayHours,
             _ => 0
         };
+
+        return dailyHours * 60m;
     }
 
     private bool IsHoliday(LocalDate date, IList<Holiday> holidays)
     {
-        var dateTime = date.AtStartOfDayInZone(BerlinTz).ToDateTimeUtc();
-        return holidays.Any(h => h.Date.Date == dateTime.Date);
+        var dateUtc = date.AtStartOfDayInZone(BerlinTz).ToDateTimeUtc();
+        return holidays.Any(h => h.Date.Date == dateUtc.Date);
     }
 
-    private int CalculatePauseDuration(IList<TimeEntry> dayEntries)
+    private static decimal CalculatePauseMinutes(IList<TimeEntry> dayEntries)
     {
-        int totalPauseMinutes = 0;
+        decimal totalPauseMinutes = 0;
         TimeEntry? pauseStart = null;
 
         foreach (var entry in dayEntries)
@@ -99,7 +136,7 @@ public class SaldoService
                 pauseStart = entry;
             else if (entry.Type == TimeEntryType.PauseEnd && pauseStart != null)
             {
-                totalPauseMinutes += (int)(entry.TimestampUtc - pauseStart.TimestampUtc).TotalMinutes;
+                totalPauseMinutes += (decimal)(entry.TimestampUtc - pauseStart.TimestampUtc).TotalMinutes;
                 pauseStart = null;
             }
         }

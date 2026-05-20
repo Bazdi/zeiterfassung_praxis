@@ -1,10 +1,13 @@
 using Microsoft.EntityFrameworkCore;
 using Zeiterfassung.Core.Models;
+using Zeiterfassung.Data.Interceptors;
 
 namespace Zeiterfassung.Data;
 
 public class ZeiterfassungDbContext : DbContext
 {
+    private readonly AuditInterceptor? _auditInterceptor;
+
     public DbSet<Employee> Employees { get; set; } = null!;
     public DbSet<TimeEntry> TimeEntries { get; set; } = null!;
     public DbSet<WorkingTimePattern> WorkingTimePatterns { get; set; } = null!;
@@ -15,14 +18,23 @@ public class ZeiterfassungDbContext : DbContext
     public DbSet<AuditLog> AuditLogs { get; set; } = null!;
     public DbSet<User> Users { get; set; } = null!;
 
-    public ZeiterfassungDbContext(DbContextOptions<ZeiterfassungDbContext> options)
+    public ZeiterfassungDbContext(
+        DbContextOptions<ZeiterfassungDbContext> options,
+        AuditInterceptor? auditInterceptor = null)
         : base(options)
     {
+        _auditInterceptor = auditInterceptor;
     }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
     {
         base.OnConfiguring(optionsBuilder);
+
+        if (_auditInterceptor != null)
+        {
+            optionsBuilder.AddInterceptors(_auditInterceptor);
+        }
+
         if (!optionsBuilder.IsConfigured)
         {
             optionsBuilder.UseSqlite("Data Source=zeiterfassung.db");
@@ -49,35 +61,50 @@ public class ZeiterfassungDbContext : DbContext
             entity.Property(e => e.Hash).IsRequired();
             entity.Property(e => e.PrevHash).IsRequired();
             entity.HasIndex(e => new { e.EmployeeId, e.CreatedAtUtc });
-            entity.HasOne(e => e.Employee).WithMany(e => e.TimeEntries).HasForeignKey(e => e.EmployeeId);
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.TimeEntries)
+                .HasForeignKey(e => e.EmployeeId);
         });
 
         modelBuilder.Entity<WorkingTimePattern>(entity =>
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.EmployeeId, e.ValidFrom });
-            entity.HasOne(e => e.Employee).WithMany(e => e.WorkingTimePatterns).HasForeignKey(e => e.EmployeeId);
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.WorkingTimePatterns)
+                .HasForeignKey(e => e.EmployeeId);
         });
 
         modelBuilder.Entity<LeaveEntitlement>(entity =>
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.EmployeeId, e.Year });
-            entity.HasOne(e => e.Employee).WithMany(e => e.LeaveEntitlements).HasForeignKey(e => e.EmployeeId);
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.LeaveEntitlements)
+                .HasForeignKey(e => e.EmployeeId);
         });
 
         modelBuilder.Entity<CorrectionRequest>(entity =>
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => e.EmployeeId);
-            entity.HasOne(e => e.Employee).WithMany(e => e.CorrectionRequests).HasForeignKey(e => e.EmployeeId);
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.CorrectionRequests)
+                .HasForeignKey(e => e.EmployeeId);
         });
 
         modelBuilder.Entity<LeaveRequest>(entity =>
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.EmployeeId, e.From, e.To });
-            entity.HasOne(e => e.Employee).WithMany(e => e.LeaveRequests).HasForeignKey(e => e.EmployeeId);
+            entity.HasOne(e => e.Employee)
+                .WithMany(e => e.LeaveRequests)
+                .HasForeignKey(e => e.EmployeeId);
+            // DSGVO Art. 9: Krankmeldungen sind Gesundheitsdaten — keine Notiz erlaubt
+            // LeaveType.Krank = 1 (Enum-Wert)
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_LeaveRequest_NoNotesForSick",
+                "\"Type\" != 1 OR \"Notes\" IS NULL"));
         });
 
         modelBuilder.Entity<Holiday>(entity =>
@@ -93,7 +120,9 @@ public class ZeiterfassungDbContext : DbContext
             entity.Property(e => e.Hash).IsRequired();
             entity.Property(e => e.PrevHash).IsRequired();
             entity.HasIndex(e => new { e.EntityName, e.EntityId, e.TimestampUtc });
-            entity.HasOne(e => e.User).WithMany(e => e.AuditLogs).HasForeignKey(e => e.UserId);
+            entity.HasOne(e => e.User)
+                .WithMany(e => e.AuditLogs)
+                .HasForeignKey(e => e.UserId);
         });
 
         modelBuilder.Entity<User>(entity =>

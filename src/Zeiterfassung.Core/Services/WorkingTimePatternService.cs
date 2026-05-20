@@ -4,12 +4,18 @@ namespace Zeiterfassung.Core.Services;
 
 public class WorkingTimePatternService
 {
+    /// <summary>
+    /// Returns the working time pattern valid for a given date.
+    /// Uses date-only comparison to avoid time-component issues.
+    /// </summary>
     public WorkingTimePattern? GetPatternForDate(
         DateTime date,
         IList<WorkingTimePattern> patterns)
     {
+        var dateOnly = date.Date;
         return patterns
-            .Where(p => p.ValidFrom <= date && (!p.ValidUntil.HasValue || p.ValidUntil >= date))
+            .Where(p => p.ValidFrom.Date <= dateOnly &&
+                        (!p.ValidUntil.HasValue || p.ValidUntil.Value.Date >= dateOnly))
             .OrderByDescending(p => p.ValidFrom)
             .FirstOrDefault();
     }
@@ -31,11 +37,12 @@ public class WorkingTimePatternService
         };
     }
 
-    public void EndPreviousPattern(WorkingTimePattern pattern)
+    /// <summary>
+    /// Closes an existing pattern by setting its ValidUntil to yesterday.
+    /// Call before creating a new pattern via DB.
+    /// </summary>
+    public void EndPattern(WorkingTimePattern pattern, DateTime newPatternStart)
     {
-        if (pattern.ValidUntil == null)
-        {
-            pattern.ValidUntil = DateTime.Today.AddDays(-1);
-        }
+        pattern.ValidUntil = newPatternStart.Date.AddDays(-1);
     }
 }

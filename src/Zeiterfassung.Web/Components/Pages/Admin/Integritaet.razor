@@ -1,0 +1,108 @@
+@page "/admin/integritaet"
+@rendermode InteractiveServer
+@inject ZeiterfassungDbContext Db
+@inject HashChainService HashChain
+
+<PageTitle>Integritätsprüfung — Admin</PageTitle>
+
+<h1>Hash-Chain Integritätsprüfung</h1>
+<p class="lead">Prüft GoBD-Manipulationsschutz für alle TimeEntry- und AuditLog-Einträge.</p>
+
+@if (_isRunning)
+{
+    <div class="alert alert-info">
+        <span class="spinner-border spinner-border-sm"></span>
+        Prüfung läuft... (@_checkedEntries / @_totalEntries Einträge)
+    </div>
+}
+
+@if (_result != null)
+{
+    <div class="alert @(_result.IsValid ? "alert-success" : "alert-danger")">
+        @if (_result.IsValid)
+        {
+            <p><strong>&#10003; Kette intakt.</strong> <span>@_totalEntries Eintraege sind unveraendert und konsistent.</span></p>
+        }
+        else
+        {
+            <strong>⚠ Manipulation erkannt!</strong>
+            <ul class="mt-2">
+                @if (_result.FailedEntryId != null)
+                {
+                    <li>Erster fehlerhafter Eintrag: ID <strong>@_result.FailedEntryId</strong></li>
+                }
+                @if (_result.ExpectedHash != null)
+                {
+                    <li>Erwarteter Hash: <code>@_result.ExpectedHash[..16]...</code></li>
+                    <li>Tatsächlicher Hash: <code>@_result.ActualHash?[..16]...</code></li>
+                }
+            </ul>
+        }
+    </div>
+}
+
+@if (_auditResult != null)
+{
+    <div class="alert @(_auditResult.IsValid ? "alert-success" : "alert-danger") mt-2">
+        @if (_auditResult.IsValid)
+        {
+            <p><strong>&#10003; AuditLog-Kette intakt.</strong> <span>@_auditEntries Audit-Eintraege sind konsistent.</span></p>
+        }
+        else
+        {
+            <p><strong>&#9888; AuditLog-Manipulation erkannt!</strong></p>
+            <p>Erster Fehler bei AuditLog-ID <strong>@_auditResult.FailedEntryId</strong></p>
+        }
+    </div>
+}
+
+<div class="mt-3">
+    <button class="btn btn-primary btn-lg" @onclick="RunCheck" disabled="@_isRunning">
+        Integrität jetzt prüfen
+    </button>
+    <span class="text-muted ms-3">Letzte Prüfung: @(_lastCheck?.ToString("dd.MM.yyyy HH:mm") ?? "noch nicht durchgeführt")</span>
+</div>
+
+@if (_isRunning is false && _lastCheck.HasValue)
+{
+    <div class="mt-3 text-muted">
+        <small>Prüfung dauerte @_duration?.TotalSeconds.ToString("F1")s</small>
+    </div>
+}
+
+@code {
+    private bool _isRunning = false;
+    private HashChainVerificationResult? _result;
+    private HashChainVerificationResult? _auditResult;
+    private int _checkedEntries = 0;
+    private int _totalEntries = 0;
+    private int _auditEntries = 0;
+    private DateTime? _lastCheck;
+    private TimeSpan? _duration;
+
+    private async Task RunCheck()
+    {
+        _isRunning = true;
+        _result = null;
+        _auditResult = null;
+        _checkedEntries = 0;
+        StateHasChanged();
+
+        var start = DateTime.UtcNow;
+
+        var timeEntries = await Db.TimeEntries.OrderBy(e => e.Id).ToListAsync();
+        _totalEntries = timeEntries.Count;
+        StateHasChanged();
+
+        _result = await HashChain.VerifyTimeEntryChainAsync(timeEntries);
+        _checkedEntries = _totalEntries;
+
+        var auditEntries = await Db.AuditLogs.OrderBy(e => e.Id).ToListAsync();
+        _auditEntries = auditEntries.Count;
+        _auditResult = await HashChain.VerifyAuditLogChainAsync(auditEntries);
+
+        _duration = DateTime.UtcNow - start;
+        _lastCheck = DateTime.Now;
+        _isRunning = false;
+    }
+}

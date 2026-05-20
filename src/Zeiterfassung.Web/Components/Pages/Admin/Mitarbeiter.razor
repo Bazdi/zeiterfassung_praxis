@@ -1,0 +1,216 @@
+@page "/admin/mitarbeiter"
+@rendermode InteractiveServer
+@inject ZeiterfassungDbContext Db
+@inject PinService PinSvc
+@inject PinAuthenticationService PinAuth
+
+<PageTitle>Mitarbeiter — Admin</PageTitle>
+
+<h1>Mitarbeiter</h1>
+
+@if (_resetPin != null)
+{
+    <div class="alert alert-warning">
+        <strong>Neuer PIN für @_resetForName:</strong>
+        <code class="fs-4 ms-2">@_resetPin</code>
+        <br /><small>Persönlich mitteilen. Mitarbeiter wird beim nächsten Login zur Änderung aufgefordert.</small>
+        <button class="btn btn-sm btn-outline-secondary ms-2" @onclick="() => _resetPin = null">Schließen</button>
+    </div>
+}
+
+<div class="mb-3">
+    <button class="btn btn-primary" @onclick="ShowAddForm">+ Neuer Mitarbeiter</button>
+</div>
+
+@if (_showForm)
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">@(_editId.HasValue ? "Mitarbeiter bearbeiten" : "Neuer Mitarbeiter")</h5>
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Vorname *</label>
+                    <input class="form-control" @bind="_formFirstName" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Nachname *</label>
+                    <input class="form-control" @bind="_formLastName" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">E-Mail</label>
+                    <input type="email" class="form-control" @bind="_formEmail" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Ist Admin</label>
+                    <div class="form-check mt-2">
+                        <input type="checkbox" class="form-check-input" id="isAdmin" @bind="_formIsAdmin" />
+                        <label class="form-check-label" for="isAdmin">Admin-Rechte</label>
+                    </div>
+                </div>
+            </div>
+            @if (_formError != null)
+            {
+                <div class="alert alert-danger mt-2">@_formError</div>
+            }
+            <div class="mt-3">
+                <button class="btn btn-success" @onclick="SaveEmployee">Speichern</button>
+                <button class="btn btn-outline-secondary ms-2" @onclick="() => _showForm = false">Abbrechen</button>
+            </div>
+        </div>
+    </div>
+}
+
+<table class="table table-hover">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>E-Mail</th>
+            <th>Status</th>
+            <th>Rollen</th>
+            <th>Fehlversuche</th>
+            <th>Aktionen</th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var emp in _employees)
+        {
+            <tr>
+                <td>@emp.LastName, @emp.FirstName</td>
+                <td>@(emp.Email ?? "—")</td>
+                <td>
+                    @if (emp.IsActive)
+                    {
+                        <span class="badge bg-success">Aktiv</span>
+                    }
+                    else
+                    {
+                        <span class="badge bg-secondary">Inaktiv</span>
+                    }
+                    @if (emp.LockedUntil > DateTime.UtcNow)
+                    {
+                        <span class="badge bg-danger ms-1">Gesperrt</span>
+                    }
+                </td>
+                <td>@(emp.IsAdmin ? "Admin" : "Mitarbeiter")</td>
+                <td>@emp.FailedPinAttempts</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="() => EditEmployee(emp)">Bearbeiten</button>
+                    <button class="btn btn-sm btn-outline-warning ms-1" @onclick="() => ResetPin(emp)">PIN Reset</button>
+                    <button class="btn btn-sm btn-outline-@(emp.IsActive ? "danger" : "success") ms-1"
+                            @onclick="() => ToggleActive(emp)">
+                        @(emp.IsActive ? "Deaktivieren" : "Aktivieren")
+                    </button>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    private List<Employee> _employees = new();
+    private bool _showForm = false;
+    private int? _editId;
+    private string _formFirstName = "";
+    private string _formLastName = "";
+    private string? _formEmail;
+    private bool _formIsAdmin = false;
+    private string? _formError;
+    private string? _resetPin;
+    private string? _resetForName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadEmployees();
+    }
+
+    private async Task LoadEmployees()
+    {
+        _employees = await Db.Employees
+            .OrderBy(e => e.LastName).ThenBy(e => e.FirstName)
+            .ToListAsync();
+    }
+
+    private void ShowAddForm()
+    {
+        _editId = null;
+        _formFirstName = "";
+        _formLastName = "";
+        _formEmail = null;
+        _formIsAdmin = false;
+        _formError = null;
+        _showForm = true;
+    }
+
+    private void EditEmployee(Employee emp)
+    {
+        _editId = emp.Id;
+        _formFirstName = emp.FirstName;
+        _formLastName = emp.LastName;
+        _formEmail = emp.Email;
+        _formIsAdmin = emp.IsAdmin;
+        _formError = null;
+        _showForm = true;
+    }
+
+    private async Task SaveEmployee()
+    {
+        if (string.IsNullOrWhiteSpace(_formFirstName) || string.IsNullOrWhiteSpace(_formLastName))
+        {
+            _formError = "Vor- und Nachname sind Pflichtfelder.";
+            return;
+        }
+
+        if (_editId.HasValue)
+        {
+            var emp = await Db.Employees.FindAsync(_editId.Value);
+            if (emp == null) return;
+            emp.FirstName = _formFirstName.Trim();
+            emp.LastName = _formLastName.Trim();
+            emp.Email = string.IsNullOrWhiteSpace(_formEmail) ? null : _formEmail.Trim();
+            emp.IsAdmin = _formIsAdmin;
+            emp.UpdatedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            var pin = PinSvc.GenerateRandomPin();
+            var (hash, salt) = PinSvc.HashPin(pin);
+
+            var newEmp = new Employee
+            {
+                FirstName = _formFirstName.Trim(),
+                LastName = _formLastName.Trim(),
+                Email = string.IsNullOrWhiteSpace(_formEmail) ? null : _formEmail.Trim(),
+                IsAdmin = _formIsAdmin,
+                PinHash = hash,
+                PinSalt = salt,
+                PinChangedAt = null, // Forces PIN change on first login
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            };
+            Db.Employees.Add(newEmp);
+            _resetPin = pin;
+            _resetForName = $"{newEmp.FirstName} {newEmp.LastName}";
+        }
+
+        await Db.SaveChangesAsync();
+        _showForm = false;
+        await LoadEmployees();
+    }
+
+    private async Task ResetPin(Employee emp)
+    {
+        var newPin = PinAuth.ResetPin(emp);
+        await Db.SaveChangesAsync();
+        _resetPin = newPin;
+        _resetForName = $"{emp.FirstName} {emp.LastName}";
+        await LoadEmployees();
+    }
+
+    private async Task ToggleActive(Employee emp)
+    {
+        emp.IsActive = !emp.IsActive;
+        emp.UpdatedAt = DateTime.UtcNow;
+        await Db.SaveChangesAsync();
+        await LoadEmployees();
+    }
+}

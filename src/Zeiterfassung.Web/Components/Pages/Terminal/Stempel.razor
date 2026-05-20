@@ -1,0 +1,478 @@
+@page "/terminal"
+@page "/terminal/stempel"
+@rendermode InteractiveServer
+@inject ZeiterfassungDbContext Db
+@inject PinAuthenticationService PinAuth
+@inject StempelManager StempelMgr
+@inject ITimeEntryRepository TimeEntryRepo
+
+<PageTitle>Zeiterfassung — Terminal</PageTitle>
+
+<div class="terminal-container">
+
+    @if (_phase == Phase.SelectEmployee)
+    {
+        <div class="terminal-header">
+            <h1>Zeiterfassung</h1>
+            <span class="terminal-time">@_now.ToString("HH:mm")</span>
+        </div>
+        <p class="terminal-subtitle">Mitarbeiter auswählen:</p>
+        <div class="employee-grid">
+            @foreach (var emp in _employees)
+            {
+                var status = _employeeStatus.GetValueOrDefault(emp.Id, EmployeeStatus.None);
+                <button class="emp-btn emp-status-@status.ToString().ToLower()"
+                        @onclick="() => SelectEmployee(emp)">
+                    <span class="emp-name">@emp.FirstName<br />@emp.LastName</span>
+                    <span class="emp-status-badge">@GetStatusLabel(status)</span>
+                </button>
+            }
+        </div>
+    }
+
+    @if (_phase == Phase.EnterPin)
+    {
+        <div class="pin-container">
+            <h2>PIN eingeben</h2>
+            <p class="emp-selected-name">@_selectedEmployee!.FirstName @_selectedEmployee.LastName</p>
+            <div class="pin-display">
+                @(new string('●', _pinInput.Length).PadRight(6, '○'))
+            </div>
+            @if (_errorMessage != null)
+            {
+                <div class="alert-error">@_errorMessage</div>
+            }
+            <div class="numpad">
+                @foreach (var digit in new[] { "1","2","3","4","5","6","7","8","9","←","0","✓" })
+                {
+                    <button class="numpad-btn @(digit == "✓" ? "numpad-confirm" : digit == "←" ? "numpad-back" : "")"
+                            @onclick="() => NumpadPressed(digit)"
+                            disabled="@(_pinInput.Length == 6 && digit != "✓" && digit != "←")">
+                        @digit
+                    </button>
+                }
+            </div>
+            <button class="btn-cancel" @onclick="Cancel">Abbrechen</button>
+        </div>
+    }
+
+    @if (_phase == Phase.SelectAction)
+    {
+        <div class="action-container">
+            <h2>@_selectedEmployee!.FirstName @_selectedEmployee.LastName</h2>
+            <p class="current-status">Status: <strong>@GetStatusLabel(_currentStatus)</strong></p>
+
+            @if (_lastAction != null)
+            {
+                <div class="success-badge">
+                    ✓ @_lastAction — @_lastActionTime!.Value.ToLocalTime().ToString("HH:mm:ss")
+                </div>
+            }
+
+            @if (_warnings.Count > 0)
+            {
+                <div class="arbzg-warnings">
+                    @foreach (var w in _warnings)
+                    {
+                        <div class="warning @w.Severity.ToString().ToLower()">⚠ @w.Message</div>
+                    }
+                </div>
+            }
+
+            <div class="action-grid">
+                @if (_currentStatus == EmployeeStatus.None || _currentStatus == EmployeeStatus.Gegangen)
+                {
+                    <button class="action-btn action-kommen" @onclick="() => DoStempel(TimeEntryType.Kommen)">
+                        KOMMEN
+                    </button>
+                }
+                @if (_currentStatus == EmployeeStatus.Anwesend)
+                {
+                    <button class="action-btn action-pause" @onclick="() => DoStempel(TimeEntryType.PauseStart)">
+                        PAUSE START
+                    </button>
+                    <button class="action-btn action-gehen" @onclick="() => DoStempel(TimeEntryType.Gehen)">
+                        GEHEN
+                    </button>
+                }
+                @if (_currentStatus == EmployeeStatus.InPause)
+                {
+                    <button class="action-btn action-pause-end" @onclick="() => DoStempel(TimeEntryType.PauseEnd)">
+                        PAUSE ENDE
+                    </button>
+                }
+            </div>
+
+            <button class="btn-cancel" @onclick="Cancel">Zurück</button>
+        </div>
+    }
+
+    @if (_phase == Phase.Confirmed)
+    {
+        <div class="confirmed-container">
+            <div class="confirmed-icon">✓</div>
+            <h2>@_selectedEmployee!.FirstName @_selectedEmployee.LastName</h2>
+            <p class="confirmed-action">@_lastAction — @_lastActionTime!.Value.ToLocalTime().ToString("HH:mm:ss")</p>
+            <p class="auto-logout-countdown">Automatischer Abmeldung in @_countdownSeconds Sekunden...</p>
+        </div>
+    }
+
+</div>
+
+<style>
+.terminal-container {
+    min-height: 100vh;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: 'Segoe UI', sans-serif;
+    padding: 2rem;
+}
+
+.terminal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    max-width: 900px;
+    margin-bottom: 2rem;
+}
+
+.terminal-header h1 { font-size: 2.5rem; margin: 0; }
+.terminal-time { font-size: 2rem; font-variant-numeric: tabular-nums; }
+.terminal-subtitle { font-size: 1.2rem; color: #aaa; margin-bottom: 1.5rem; }
+
+.employee-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    width: 100%;
+    max-width: 900px;
+}
+
+.emp-btn {
+    padding: 1.5rem 1rem;
+    border: 2px solid #3a3a5c;
+    border-radius: 12px;
+    background: #16213e;
+    color: #e0e0e0;
+    cursor: pointer;
+    font-size: 1.1rem;
+    text-align: center;
+    transition: all 0.15s;
+}
+.emp-btn:hover { background: #1f3461; border-color: #5575bb; transform: scale(1.02); }
+.emp-btn.emp-status-anwesend { border-color: #28a745; }
+.emp-btn.emp-status-inpause { border-color: #ffc107; }
+.emp-btn.emp-status-gegangen { border-color: #6c757d; }
+.emp-name { display: block; font-size: 1.3rem; font-weight: 600; }
+.emp-status-badge { display: inline-block; margin-top: 0.4rem; font-size: 0.85rem; color: #aaa; }
+
+.pin-container {
+    text-align: center;
+    width: 100%;
+    max-width: 400px;
+}
+.pin-container h2 { font-size: 1.8rem; margin-bottom: 0.5rem; }
+.emp-selected-name { font-size: 1.3rem; color: #aab; margin-bottom: 1rem; }
+.pin-display {
+    font-size: 2.5rem;
+    letter-spacing: 0.5rem;
+    margin: 1rem 0;
+    background: #0f3460;
+    padding: 1rem 2rem;
+    border-radius: 8px;
+    font-family: monospace;
+}
+.numpad {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+    margin: 1.5rem 0;
+}
+.numpad-btn {
+    padding: 1.2rem;
+    font-size: 1.5rem;
+    border: none;
+    border-radius: 10px;
+    background: #16213e;
+    color: #e0e0e0;
+    cursor: pointer;
+    transition: background 0.1s;
+    border: 2px solid #3a3a5c;
+}
+.numpad-btn:hover:not(:disabled) { background: #1f3461; }
+.numpad-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.numpad-confirm { background: #1a6b3c !important; border-color: #28a745; font-size: 1.2rem; }
+.numpad-back { background: #4a1a1a !important; border-color: #dc3545; }
+
+.alert-error {
+    background: #4a1a1a;
+    border: 1px solid #dc3545;
+    border-radius: 8px;
+    padding: 0.75rem 1.5rem;
+    margin: 0.5rem 0;
+    color: #ff8080;
+}
+
+.action-container { text-align: center; width: 100%; max-width: 700px; }
+.action-container h2 { font-size: 2rem; }
+.current-status { font-size: 1.2rem; color: #aaa; margin-bottom: 1rem; }
+.success-badge {
+    background: #1a3a1a;
+    border: 1px solid #28a745;
+    border-radius: 8px;
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+    color: #80ff80;
+}
+.arbzg-warnings { margin: 1rem 0; }
+.warning {
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+}
+.warning.high { background: #4a1a1a; border: 1px solid #dc3545; color: #ffaaaa; }
+.warning.medium { background: #3a3a1a; border: 1px solid #ffc107; color: #ffffaa; }
+
+.action-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin: 2rem 0;
+}
+.action-btn {
+    padding: 2.5rem 1rem;
+    font-size: 1.5rem;
+    font-weight: 700;
+    border: none;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+.action-btn:hover { transform: scale(1.03); filter: brightness(1.1); }
+.action-kommen { background: #28a745; color: white; grid-column: 1 / -1; }
+.action-pause { background: #ffc107; color: #1a1a1a; }
+.action-pause-end { background: #17a2b8; color: white; grid-column: 1 / -1; }
+.action-gehen { background: #dc3545; color: white; }
+
+.btn-cancel {
+    background: transparent;
+    border: 1px solid #555;
+    color: #aaa;
+    padding: 0.75rem 2rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1rem;
+    margin-top: 1rem;
+}
+.btn-cancel:hover { border-color: #aaa; color: #e0e0e0; }
+
+.confirmed-container { text-align: center; }
+.confirmed-icon { font-size: 5rem; color: #28a745; }
+.confirmed-container h2 { font-size: 2rem; }
+.confirmed-action { font-size: 1.5rem; color: #28a745; }
+.auto-logout-countdown { color: #aaa; margin-top: 2rem; }
+</style>
+
+@code {
+    private enum Phase { SelectEmployee, EnterPin, SelectAction, Confirmed }
+    private enum EmployeeStatus { None, Anwesend, InPause, Gegangen }
+
+    private Phase _phase = Phase.SelectEmployee;
+    private List<Employee> _employees = new();
+    private Dictionary<int, EmployeeStatus> _employeeStatus = new();
+    private Employee? _selectedEmployee;
+    private string _pinInput = "";
+    private string? _errorMessage;
+    private EmployeeStatus _currentStatus;
+    private string? _lastAction;
+    private DateTime? _lastActionTime;
+    private List<ValidationWarning> _warnings = new();
+    private int _countdownSeconds = 5;
+    private DateTime _now = DateTime.Now;
+    private System.Timers.Timer? _clockTimer;
+    private System.Timers.Timer? _logoutTimer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _employees = await Db.Employees
+            .Where(e => e.IsActive)
+            .OrderBy(e => e.LastName)
+            .ThenBy(e => e.FirstName)
+            .ToListAsync();
+
+        await RefreshStatusAsync();
+
+        _clockTimer = new System.Timers.Timer(1000);
+        _clockTimer.Elapsed += (_, _) => { _now = DateTime.Now; InvokeAsync(StateHasChanged); };
+        _clockTimer.Start();
+    }
+
+    private async Task RefreshStatusAsync()
+    {
+        var today = DateTime.UtcNow.Date;
+        foreach (var emp in _employees)
+        {
+            var last = await Db.TimeEntries
+                .Where(e => e.EmployeeId == emp.Id && e.TimestampUtc >= today)
+                .OrderByDescending(e => e.TimestampUtc)
+                .FirstOrDefaultAsync();
+
+            _employeeStatus[emp.Id] = last?.Type switch
+            {
+                TimeEntryType.Kommen => EmployeeStatus.Anwesend,
+                TimeEntryType.PauseStart => EmployeeStatus.InPause,
+                TimeEntryType.PauseEnd => EmployeeStatus.Anwesend,
+                TimeEntryType.Gehen => EmployeeStatus.Gegangen,
+                _ => EmployeeStatus.None
+            };
+        }
+    }
+
+    private void SelectEmployee(Employee emp)
+    {
+        _selectedEmployee = emp;
+        _pinInput = "";
+        _errorMessage = null;
+        _phase = Phase.EnterPin;
+    }
+
+    private void NumpadPressed(string key)
+    {
+        if (key == "←")
+        {
+            if (_pinInput.Length > 0)
+                _pinInput = _pinInput[..^1];
+            _errorMessage = null;
+        }
+        else if (key == "✓")
+        {
+            _ = ValidatePinAsync();
+        }
+        else if (_pinInput.Length < 6)
+        {
+            _pinInput += key;
+            if (_pinInput.Length == 6)
+                _ = ValidatePinAsync();
+        }
+    }
+
+    private async Task ValidatePinAsync()
+    {
+        if (_selectedEmployee == null || _pinInput.Length != 6)
+            return;
+
+        var emp = await Db.Employees.FindAsync(_selectedEmployee.Id);
+        if (emp == null) { Cancel(); return; }
+
+        var result = PinAuth.Authenticate(emp, _pinInput);
+        await Db.SaveChangesAsync();
+
+        if (!result.Success)
+        {
+            _pinInput = "";
+            if (result.RequiresAdminReset)
+                _errorMessage = "Account gesperrt. Bitte Admin kontaktieren.";
+            else if (result.LockoutRemainingSeconds.HasValue)
+                _errorMessage = $"Gesperrt für {result.LockoutRemainingSeconds}s.";
+            else
+                _errorMessage = $"Falsche PIN. {result.RemainingAttempts} Versuche übrig.";
+            return;
+        }
+
+        _currentStatus = _employeeStatus.GetValueOrDefault(emp.Id, EmployeeStatus.None);
+        _lastAction = null;
+        _warnings = new();
+        _phase = Phase.SelectAction;
+    }
+
+    private async Task DoStempel(TimeEntryType type)
+    {
+        if (_selectedEmployee == null) return;
+
+        try
+        {
+            var request = new StempelRequest
+            {
+                EmployeeId = _selectedEmployee.Id,
+                Type = type,
+                Source = EntrySource.Terminal
+            };
+
+            var result = await StempelMgr.StempelAsync(request, TimeEntryRepo);
+            await Db.SaveChangesAsync();
+
+            _lastAction = type switch
+            {
+                TimeEntryType.Kommen => "Kommen",
+                TimeEntryType.Gehen => "Gehen",
+                TimeEntryType.PauseStart => "Pause Start",
+                TimeEntryType.PauseEnd => "Pause Ende",
+                _ => type.ToString()
+            };
+            _lastActionTime = result.Entry.TimestampUtc;
+            _warnings = result.Warnings.ToList();
+            _countdownSeconds = 5;
+            _phase = Phase.Confirmed;
+
+            StartLogoutTimer();
+            await RefreshStatusAsync();
+        }
+        catch (StempelException ex)
+        {
+            _errorMessage = ex.Message;
+        }
+    }
+
+    private void StartLogoutTimer()
+    {
+        _logoutTimer?.Dispose();
+        _logoutTimer = new System.Timers.Timer(1000);
+        _logoutTimer.Elapsed += (_, _) =>
+        {
+            _countdownSeconds--;
+            if (_countdownSeconds <= 0)
+            {
+                _logoutTimer?.Dispose();
+                InvokeAsync(Reset);
+            }
+            InvokeAsync(StateHasChanged);
+        };
+        _logoutTimer.Start();
+    }
+
+    private void Reset()
+    {
+        _phase = Phase.SelectEmployee;
+        _selectedEmployee = null;
+        _pinInput = "";
+        _errorMessage = null;
+        _lastAction = null;
+        _lastActionTime = null;
+        _warnings = new();
+        _logoutTimer?.Dispose();
+        _ = RefreshStatusAsync();
+    }
+
+    private void Cancel() => Reset();
+
+    private string GetStatusLabel(EmployeeStatus status) => status switch
+    {
+        EmployeeStatus.Anwesend => "Anwesend",
+        EmployeeStatus.InPause => "Pause",
+        EmployeeStatus.Gegangen => "Gegangen",
+        _ => ""
+    };
+
+    public void Dispose()
+    {
+        _clockTimer?.Dispose();
+        _logoutTimer?.Dispose();
+    }
+}
